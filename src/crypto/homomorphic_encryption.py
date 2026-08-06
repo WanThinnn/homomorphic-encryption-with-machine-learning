@@ -49,6 +49,8 @@ class FHEPipeline:
             self.crypto_context.Enable(PKESchemeFeature.KEYSWITCH)
             # Bật tính năng Leveled SHE (Tính toán đồng cấu)
             self.crypto_context.Enable(PKESchemeFeature.LEVELEDSHE)
+            # Bật tính năng Advanced SHE (cho các phép tính phức tạp như EvalSum)
+            self.crypto_context.Enable(PKESchemeFeature.ADVANCEDSHE)
             
             logger.info(f"FHE CryptoContext (CKKS) khởi tạo thành công. MultDepth={self.mult_depth}, ScaleMod={self.scale_mod_size}")
         except Exception as e:
@@ -73,6 +75,12 @@ class FHEPipeline:
         logger.info("Đang tạo Khóa Relinearization (EvalMultKey) cho phép nhân...")
         self.crypto_context.EvalMultKeyGen(self.key_pair.secretKey)
         
+        logger.info("Đang tạo Khóa Rotation (EvalSumKey) cho phép tính tổng vector...")
+        try:
+            self.crypto_context.EvalSumKeyGen(self.key_pair.secretKey)
+        except Exception as e:
+            logger.warning(f"Lỗi khi tạo EvalSumKey: {e}. Bạn có thể bỏ qua nếu không dùng EvalSum.")
+            
         return self.key_pair
 
     def encrypt_vector(self, vector: List[float]) -> Any:
@@ -114,3 +122,32 @@ class FHEPipeline:
         plaintext_result.SetLength(self.vector_dim)
         
         return plaintext_result.GetRealPackedValue()
+
+    def encode_vector(self, vector: List[float]) -> Any:
+        """Mã hóa vector thành dạng Plaintext (để nhân/cộng với Ciphertext)."""
+        if not OPENFHE_LOADED:
+            return "mock_plaintext"
+        if len(vector) != self.vector_dim:
+            logger.warning(f"Cảnh báo: Kích thước vector ({len(vector)}) khác với dự kiến ({self.vector_dim}).")
+        return self.crypto_context.MakeCKKSPackedPlaintext(vector)
+
+    def eval_add(self, ct1: Any, ct2: Any) -> Any:
+        """Cộng hai Ciphertext, hoặc cộng Ciphertext với Plaintext."""
+        if not OPENFHE_LOADED:
+            return "mock_eval_add"
+        return self.crypto_context.EvalAdd(ct1, ct2)
+
+    def eval_mult(self, ct: Any, item: Any) -> Any:
+        """Nhân Ciphertext với Ciphertext hoặc Plaintext."""
+        if not OPENFHE_LOADED:
+            return "mock_eval_mult"
+        return self.crypto_context.EvalMult(ct, item)
+
+    def eval_sum(self, ct: Any, batch_size: int = None) -> Any:
+        """Tính tổng tất cả các phần tử trong Ciphertext."""
+        if not OPENFHE_LOADED:
+            return "mock_eval_sum"
+        bs = batch_size if batch_size else self.batch_size
+        if bs == 0:
+            bs = self.vector_dim
+        return self.crypto_context.EvalSum(ct, bs)

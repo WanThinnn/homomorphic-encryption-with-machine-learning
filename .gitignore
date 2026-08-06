@@ -1,0 +1,107 @@
+# ==========================================
+# 1. Byte-compiled / optimized / DLL files
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# ==========================================
+# 2. Distribution / packaging
+# ==========================================
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==========================================
+# 3. Virtual Environments (Luôn luôn bỏ qua)
+# ==========================================
+.venv/
+venv/
+ENV/
+env/
+ENV*/
+.env/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==========================================
+# 4. Jupyter Notebook & IDEs
+# ==========================================
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# VS Code & Cursor
+.vscode/
+.cursor/
+.history/
+
+# PyCharm
+.idea/
+
+# Thống kê / Logs chung
+*.log
+.pdm-plugins/
+.pdm-toml
+
+# ==========================================
+# 5. AI/ML, PyTorch, ONNX & Models Checkpoints
+# ==========================================
+# Bỏ qua các file lưu trọng số mô hình nặng
+*.pth
+*.pt
+*.onnx
+*.pkl
+*.pickle
+*.h5
+*.tflite
+checkpoint/
+checkpoints/
+models/weights/
+
+# ==========================================
+# 6. Data & Datasets (Giữ repo sạch sẽ)
+# ==========================================
+# Bỏ qua dữ liệu thô / CSV / Đồ thị trích xuất
+*.csv
+*.json
+*.pcap
+*.evtx
+data/
+datasets/
+raw_logs/
+extracted_graph/
+
+# ==========================================
+# 7. Mật mã / FHE / Cấu hình Nhạy cảm
+# ==========================================
+# Tuyệt đối không upload Private Key hoặc cấu hình môi trường
+.env
+.env.*
+*.pem
+*.key
+*private*.txt
+eval_keys/
+tmp/
+src/models/securebert-2
+!src/lib/openfhe.pyd
+!src/scheme/mappings/*
+!.env.example
+logs/*
+*_plan.md
+.agents/*

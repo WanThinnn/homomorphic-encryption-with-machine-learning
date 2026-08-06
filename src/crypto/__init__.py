@@ -7,6 +7,6 @@ Components:
 - CrossTenantService: Encrypted cross-tenant threat intelligence
 """
 
-from src.crypto.pipeline import FHEPipeline
+from .homomorphic_encryption import FHEPipeline
 
 __all__ = ["FHEPipeline"]
