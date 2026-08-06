@@ -56,11 +56,16 @@ def main():
         json.dump({"vector": vector}, f)
         
     logger.info("Gửi dữ liệu sang FHE Server để tính toán ẩn danh...")
-    mingw_python = r"C:\msys64\mingw64\bin\python.exe"
+    
+    if sys.platform == 'linux':
+        python_executable = sys.executable
+    else:
+        python_executable = r"C:\msys64\mingw64\bin\python.exe"
+        
     worker_script = os.path.join(base_dir, "core", "fhe_worker.py")
     
     try:
-        subprocess.run([mingw_python, worker_script, pin], check=True)
+        subprocess.run([python_executable, worker_script, pin], check=True)
     except subprocess.CalledProcessError as e:
         logger.error(f"FHE Worker bị lỗi: {e}")
         sys.exit(1)

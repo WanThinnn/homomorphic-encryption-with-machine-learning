@@ -10,8 +10,9 @@ src_dir = os.path.dirname(current_dir)
 base_dir = os.path.dirname(src_dir)
 sys.path.append(base_dir)
 
-# Thêm src/lib để import openfhe.pyd
-sys.path.append(os.path.join(src_dir, "lib"))
+# Thêm src/lib để import openfhe.pyd (Chỉ Windows)
+if sys.platform != 'linux':
+    sys.path.append(os.path.join(src_dir, "lib"))
 
 from src.crypto.homomorphic_encryption import FHEPipeline
 from src.ml.linear_model import EncryptedLinearRegression
