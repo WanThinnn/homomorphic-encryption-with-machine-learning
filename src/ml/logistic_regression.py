@@ -21,7 +21,7 @@ class LogisticRegressionClientModel:
         weights_path = os.path.join(models_dir, model_name, "weights.json")
         
         if not os.path.exists(vocab_path) or not os.path.exists(weights_path):
-            raise FileNotFoundError("Không tìm thấy model thật. Hãy chạy src/ml/download_model.py trước.")
+            raise FileNotFoundError("Không tìm thấy model thật. Hãy chạy src/ml/models/simple_logistic_regression/download_model.py trước.")
             
         with open(vocab_path, 'r', encoding='utf-8') as f:
             vocab_data = json.load(f)
