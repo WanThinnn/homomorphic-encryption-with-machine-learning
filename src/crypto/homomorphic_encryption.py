@@ -2,9 +2,10 @@ import logging
 from typing import List, Any
 import os
 import secrets
-from Cryptodome.Cipher import AES
-from Cryptodome.Protocol.KDF import PBKDF2
-from Cryptodome.Random import get_random_bytes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,14 @@ class FHEPipeline:
         
     def _derive_key(self, pin: str, salt: bytes) -> bytes:
         """Sử dụng PBKDF2HMAC để dẫn xuất khóa 256-bit từ mã PIN."""
-        return PBKDF2(pin.encode('utf-8'), salt, dkLen=32, count=600000)
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=600000,
+            backend=default_backend()
+        )
+        return kdf.derive(pin.encode('utf-8'))
         
     def save_keys(self, pin: str, secrets_dir: str = "secrets"):
         """Lưu khóa công khai, ngữ cảnh và khóa bí mật (được mã hóa AES-GCM) vào đĩa."""
@@ -116,16 +124,16 @@ class FHEPipeline:
         with open(priv_temp_path, 'rb') as f:
             priv_data = f.read()
             
-        salt = get_random_bytes(16)
+        salt = os.urandom(16)
         aes_key = self._derive_key(pin, salt)
-        nonce = get_random_bytes(12)
+        nonce = os.urandom(12)
         
-        cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
-        ciphertext, tag = cipher.encrypt_and_digest(priv_data)
+        aesgcm = AESGCM(aes_key)
+        ciphertext = aesgcm.encrypt(nonce, priv_data, None)
         
         priv_enc_path = os.path.join(secrets_dir, "private_key.enc")
         with open(priv_enc_path, 'wb') as f:
-            f.write(salt + nonce + tag + ciphertext)
+            f.write(salt + nonce + ciphertext)
             
         # Xóa file tạm
         os.remove(priv_temp_path)
@@ -149,35 +157,33 @@ class FHEPipeline:
             
             salt = data[:16]
             nonce = data[16:28]
-            tag = data[28:44]
-            ciphertext = data[44:]
+            ciphertext = data[28:]
             
             aes_key = self._derive_key(pin, salt)
-            cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
-            priv_data = cipher.decrypt_and_verify(ciphertext, tag)
+            aesgcm = AESGCM(aes_key)
+            priv_data = aesgcm.decrypt(nonce, ciphertext, None)
             
             priv_temp_path = os.path.join(secrets_dir, "private_key_dec.tmp")
             with open(priv_temp_path, 'wb') as f:
                 f.write(priv_data)
                 
             # Đọc lại bằng OpenFHE (Deserialize)
-            # Do Python wrapper của OpenFHE Deserialize có cách gọi deserialize khác nhau,
-            # (ví dụ SerializeToFile -> DeserializeFromFile). 
-            # Giả sử ta tái tạo lại hoặc OpenFHE tự động nạp.
-            # Lưu ý: Hiện OpenFHE python binding có hàm DeserializeCryptoContext, DeserializePrivateKey...
-            cc, pub, priv = openfhe.CryptoContext(), openfhe.PublicKey(), openfhe.PrivateKey()
-            openfhe.DeserializeCryptoContext(os.path.join(secrets_dir, "cryptocontext.bin"), cc, openfhe.BINARY)
-            openfhe.DeserializePublicKey(os.path.join(secrets_dir, "public_key.bin"), pub, openfhe.BINARY)
-            openfhe.DeserializePrivateKey(priv_temp_path, priv, openfhe.BINARY)
+            # Do Python wrapper của OpenFHE trả về tuple(Object, bool)
+            cc, ok1 = openfhe.DeserializeCryptoContext(os.path.join(secrets_dir, "cryptocontext.bin"), openfhe.SERBINARY)
+            pub, ok2 = openfhe.DeserializePublicKey(os.path.join(secrets_dir, "public_key.bin"), openfhe.SERBINARY)
+            priv, ok3 = openfhe.DeserializePrivateKey(priv_temp_path, openfhe.SERBINARY)
             
+            if not (ok1 and ok2 and ok3):
+                raise Exception("Deserialize object failed")
+                
             self.crypto_context = cc
             self.key_pair = openfhe.KeyPair(pub, priv)
             
             os.remove(priv_temp_path)
             logger.info("Đã giải mã và nạp Private Key thành công!")
             return True
-        except ValueError as e:
-            logger.error(f"Giải mã thất bại (Sai mã PIN hoặc dữ liệu bị hỏng): {e}")
+        except Exception as e:
+            logger.error(f"Giải mã thất bại (Sai mã PIN, dữ liệu hỏng, hoặc format cũ): {e}")
             if os.path.exists(os.path.join(secrets_dir, "private_key_dec.tmp")):
                 os.remove(os.path.join(secrets_dir, "private_key_dec.tmp"))
             return False
