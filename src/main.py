@@ -1,13 +1,12 @@
 import sys
 import logging
 from typing import List
+import os
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Thêm thư mục lib vào sys.path để có thể load module openfhe
-import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'lib'))
 
 from crypto.homomorphic_encryption import FHEPipeline
@@ -18,55 +17,90 @@ def calculate_plaintext_prediction(inputs: List[float], weights: List[float], bi
     dot_product = sum(i * w for i, w in zip(inputs, weights))
     return dot_product + bias
 
+def text_to_vector(text: str) -> List[float]:
+    """Chuyển đổi văn bản thành vector các mã ASCII."""
+    return [float(ord(c)) for c in text]
+
 def main():
-    logger.info("=== BẮT ĐẦU DEMO FHE + MACHINE LEARNING (LINEAR REGRESSION) ===")
+    print("\n" + "="*60)
+    print("DEMO BẢO MẬT MÃ HÓA ĐỒNG CẤU (FHE) VỚI MACHINE LEARNING")
+    print("="*60)
     
-    # 1. Cấu hình bài toán
-    vector_dim = 4 # Kích thước linh hoạt như bạn yêu cầu
+    # --- 1. Tương tác: Load hay Tạo Key ---
+    fhe = FHEPipeline(mult_depth=5, scale_mod_size=40, batch_size=0) # batch_size=0 để tự động (max)
     
-    weights = [0.5, 1.2, -0.8, 2.1]
-    bias = 0.5
+    secrets_dir = os.path.join(os.path.dirname(__file__), "secrets")
+    priv_enc_path = os.path.join(secrets_dir, "private_key.enc")
     
-    client_input = [1.5, 2.0, -1.0, 0.5]
+    if os.path.exists(priv_enc_path):
+        print("\n[HỆ THỐNG] Đã tìm thấy khóa FHE đã lưu.")
+        choice = input("Bạn muốn (1) Load khóa cũ, hay (2) Tạo khóa mới (ghi đè)? [1/2]: ").strip()
+        if choice == '1':
+            pin = input("Vui lòng nhập mã PIN (8 ký tự) để giải mã Private Key: ").strip()
+            if not fhe.load_keys(pin, secrets_dir):
+                print("[!] Lỗi giải mã hoặc sai PIN. Thoát chương trình.")
+                return
+        else:
+            print("\n[HỆ THỐNG] Đang tạo cặp khóa Public / Private mới...")
+            fhe.generate_keys()
+            pin = input("Tạo mã PIN (8 ký tự) để bảo vệ Private Key của bạn: ").strip()
+            fhe.save_keys(pin, secrets_dir)
+    else:
+        print("\n[HỆ THỐNG] Chưa có khóa FHE. Đang khởi tạo khóa mới...")
+        fhe.generate_keys()
+        pin = input("Tạo mã PIN (8 ký tự) để bảo vệ Private Key của bạn: ").strip()
+        fhe.save_keys(pin, secrets_dir)
+        
+    # --- 2. Tương tác: Nhập dữ liệu Text ---
+    print("\n" + "-"*60)
+    print("Mô hình ML hiện tại là một Linear Regression tính 'Độ phức tạp văn bản'.")
+    print("Mỗi ký tự sẽ được chuyển thành mã ASCII, sau đó nhân với một trọng số cố định (0.01) và cộng với Bias.")
+    print("-" * 60)
     
-    # 2. Khởi tạo FHE Pipeline (Đóng vai trò quản lý khóa và context)
-    fhe = FHEPipeline(mult_depth=5, scale_mod_size=40, batch_size=vector_dim, vector_dim=vector_dim)
+    user_text = input("\nNhập một đoạn text bạn muốn phân tích: ").strip()
+    if not user_text:
+        user_text = "Hello FHE"
+        print(f"Không có đầu vào, dùng mặc định: '{user_text}'")
+        
+    # Chuyển thành vector
+    client_input = text_to_vector(user_text)
+    vector_dim = len(client_input)
+    fhe.vector_dim = vector_dim  # Dynamic theo length của input
     
-    logger.info("--- CLIENT: TẠO KHÓA VÀ MÃ HÓA DỮ LIỆU ---")
-    fhe.generate_keys()
-    
+    # --- 3. Client mã hóa và gửi ---
+    print("\n[CLIENT] Đang mã hóa vector dữ liệu... (Không ai có thể đọc được)")
     encrypted_input = fhe.encrypt_vector(client_input)
-    logger.info("Client đã mã hóa dữ liệu thành công.")
+    print("[CLIENT] Hoàn tất mã hóa.")
     
-    logger.info("--- SERVER: NHẬN DỮ LIỆU MÃ HÓA VÀ CHẠY MÔ HÌNH ---")
-    # Khởi tạo mô hình trên server
+    # --- 4. Server xử lý ---
+    print("\n[SERVER] Nhận dữ liệu mã hóa từ Client...")
+    print(f"[SERVER] Kích thước dữ liệu động nhận được: {vector_dim} chiều.")
+    
+    # Server tạo trọng số phù hợp với kích thước dữ liệu (Dynamic weights)
+    weights = [0.01] * vector_dim
+    bias = 1.5
+    
     model = EncryptedLinearRegression(weights=weights, bias=bias)
     
-    # Chạy inference trực tiếp trên dữ liệu mã hóa
+    print("[SERVER] Đang chạy mô hình Học Máy trên dữ liệu ĐÃ MÃ HÓA...")
     encrypted_prediction = model.predict_encrypted(encrypted_input, fhe)
-    logger.info("Server đã hoàn thành dự đoán trên Ciphertext.")
+    print("[SERVER] Hoàn thành. Gửi trả kết quả mã hóa về Client.")
     
-    logger.info("--- CLIENT: NHẬN KẾT QUẢ MÃ HÓA VÀ GIẢI MÃ ---")
-    # Client nhận kết quả và giải mã bằng Private Key
+    # --- 5. Client giải mã ---
+    print("\n[CLIENT] Nhận kết quả từ Server và giải mã bằng Private Key...")
     decrypted_result = fhe.decrypt_vector(encrypted_prediction)
-    
-    # Kết quả EvalSum thường nằm ở tất cả các slot hoặc slot đầu tiên, ta lấy slot đầu
     fhe_final_value = decrypted_result[0]
     
-    logger.info("--- TỔNG KẾT & SO SÁNH ---")
+    print("\n" + "="*60)
+    print("KẾT QUẢ SO SÁNH")
+    print("="*60)
     expected_value = calculate_plaintext_prediction(client_input, weights, bias)
-    logger.info(f"Dữ liệu đầu vào: {client_input}")
-    logger.info(f"Trọng số mô hình: {weights}, Bias: {bias}")
-    logger.info(f"Dự đoán mong đợi (Plaintext): {expected_value:.4f}")
-    logger.info(f"Dự đoán bằng FHE (Ciphertext): {fhe_final_value:.4f}")
     
-    diff = abs(expected_value - fhe_final_value)
-    logger.info(f"Sai số (Precision error do FHE): {diff:.6f}")
-    
-    if diff < 0.01:
-        logger.info("=> THÀNH CÔNG: Kết quả FHE hoàn toàn khớp với kết quả thông thường!")
-    else:
-        logger.warning("=> CẢNH BÁO: Sai số lớn hơn bình thường.")
+    print(f"Text đầu vào: '{user_text}'")
+    print(f"Dự đoán mong đợi (Plaintext): {expected_value:.4f}")
+    print(f"Dự đoán bằng FHE (Ciphertext): {fhe_final_value:.4f}")
+    print(f"Sai số: {abs(expected_value - fhe_final_value):.6f}")
+    print("="*60 + "\n")
 
 if __name__ == "__main__":
     main()

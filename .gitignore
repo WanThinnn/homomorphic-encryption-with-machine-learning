@@ -97,6 +97,8 @@ extracted_graph/
 *.key
 *private*.txt
 eval_keys/
+src/secrets/
+!./src/secrets/.gitkeep
 tmp/
 src/models/securebert-2
 !src/lib/openfhe.pyd

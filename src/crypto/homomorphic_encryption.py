@@ -1,10 +1,15 @@
 import logging
 from typing import List, Any
 import os
+import secrets
+from Cryptodome.Cipher import AES
+from Cryptodome.Protocol.KDF import PBKDF2
+from Cryptodome.Random import get_random_bytes
 
 logger = logging.getLogger(__name__)
 
 try:
+    import openfhe
     from openfhe import (
         CCParamsCKKSRNS,
         GenCryptoContext,
@@ -82,6 +87,100 @@ class FHEPipeline:
             logger.warning(f"Lỗi khi tạo EvalSumKey: {e}. Bạn có thể bỏ qua nếu không dùng EvalSum.")
             
         return self.key_pair
+        
+    def _derive_key(self, pin: str, salt: bytes) -> bytes:
+        """Sử dụng PBKDF2HMAC để dẫn xuất khóa 256-bit từ mã PIN."""
+        return PBKDF2(pin.encode('utf-8'), salt, dkLen=32, count=600000)
+        
+    def save_keys(self, pin: str, secrets_dir: str = "secrets"):
+        """Lưu khóa công khai, ngữ cảnh và khóa bí mật (được mã hóa AES-GCM) vào đĩa."""
+        if not OPENFHE_LOADED:
+            logger.warning("Mock: Bỏ qua việc lưu khóa.")
+            return
+            
+        os.makedirs(secrets_dir, exist_ok=True)
+        
+        # Lưu CryptoContext
+        cc_path = os.path.join(secrets_dir, "cryptocontext.bin")
+        openfhe.SerializeToFile(cc_path, self.crypto_context, openfhe.BINARY)
+        
+        # Lưu Public Key
+        pub_path = os.path.join(secrets_dir, "public_key.bin")
+        openfhe.SerializeToFile(pub_path, self.key_pair.publicKey, openfhe.BINARY)
+        
+        # Lưu Private Key (tạm thời)
+        priv_temp_path = os.path.join(secrets_dir, "private_key.tmp")
+        openfhe.SerializeToFile(priv_temp_path, self.key_pair.secretKey, openfhe.BINARY)
+        
+        # Mã hóa Private Key bằng AES-GCM-256
+        with open(priv_temp_path, 'rb') as f:
+            priv_data = f.read()
+            
+        salt = get_random_bytes(16)
+        aes_key = self._derive_key(pin, salt)
+        nonce = get_random_bytes(12)
+        
+        cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
+        ciphertext, tag = cipher.encrypt_and_digest(priv_data)
+        
+        priv_enc_path = os.path.join(secrets_dir, "private_key.enc")
+        with open(priv_enc_path, 'wb') as f:
+            f.write(salt + nonce + tag + ciphertext)
+            
+        # Xóa file tạm
+        os.remove(priv_temp_path)
+        logger.info(f"Đã lưu thành công và mã hóa Private Key vào {secrets_dir}/")
+
+    def load_keys(self, pin: str, secrets_dir: str = "secrets") -> bool:
+        """Tải khóa từ đĩa, giải mã Private Key bằng AES-GCM."""
+        if not OPENFHE_LOADED:
+            logger.warning("Mock: Bỏ qua việc tải khóa.")
+            return False
+            
+        priv_enc_path = os.path.join(secrets_dir, "private_key.enc")
+        if not os.path.exists(priv_enc_path):
+            logger.error("Không tìm thấy Private Key.")
+            return False
+            
+        # Giải mã Private Key
+        try:
+            with open(priv_enc_path, 'rb') as f:
+                data = f.read()
+            
+            salt = data[:16]
+            nonce = data[16:28]
+            tag = data[28:44]
+            ciphertext = data[44:]
+            
+            aes_key = self._derive_key(pin, salt)
+            cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
+            priv_data = cipher.decrypt_and_verify(ciphertext, tag)
+            
+            priv_temp_path = os.path.join(secrets_dir, "private_key_dec.tmp")
+            with open(priv_temp_path, 'wb') as f:
+                f.write(priv_data)
+                
+            # Đọc lại bằng OpenFHE (Deserialize)
+            # Do Python wrapper của OpenFHE Deserialize có cách gọi deserialize khác nhau,
+            # (ví dụ SerializeToFile -> DeserializeFromFile). 
+            # Giả sử ta tái tạo lại hoặc OpenFHE tự động nạp.
+            # Lưu ý: Hiện OpenFHE python binding có hàm DeserializeCryptoContext, DeserializePrivateKey...
+            cc, pub, priv = openfhe.CryptoContext(), openfhe.PublicKey(), openfhe.PrivateKey()
+            openfhe.DeserializeCryptoContext(os.path.join(secrets_dir, "cryptocontext.bin"), cc, openfhe.BINARY)
+            openfhe.DeserializePublicKey(os.path.join(secrets_dir, "public_key.bin"), pub, openfhe.BINARY)
+            openfhe.DeserializePrivateKey(priv_temp_path, priv, openfhe.BINARY)
+            
+            self.crypto_context = cc
+            self.key_pair = openfhe.KeyPair(pub, priv)
+            
+            os.remove(priv_temp_path)
+            logger.info("Đã giải mã và nạp Private Key thành công!")
+            return True
+        except ValueError as e:
+            logger.error(f"Giải mã thất bại (Sai mã PIN hoặc dữ liệu bị hỏng): {e}")
+            if os.path.exists(os.path.join(secrets_dir, "private_key_dec.tmp")):
+                os.remove(os.path.join(secrets_dir, "private_key_dec.tmp"))
+            return False
 
     def encrypt_vector(self, vector: List[float]) -> Any:
         """

@@ -1,91 +1,113 @@
 import sys
+import os
 import inspect
+import re
 
-# Đường dẫn tới thư mục chứa openfhe.pyd
-sys.path.append("D:/Documents/UIT/FHE/homomorphic-encryption-with-machine-learning/src/lib")
+# Thêm path chứa openfhe.pyd
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src', 'lib'))
+import openfhe
 
-try:
-    import openfhe
-    print("Import openfhe.pyd thành công!")
-except ImportError as e:
-    print(f"Lỗi import openfhe: {e}")
-    sys.exit(1)
+out_path = os.path.join(os.path.dirname(__file__), '..', 'src', 'lib', 'openfhe.pyi')
 
-def format_docstring(doc: str, indent: str = "    ") -> list[str]:
-    """Làm sạch docstring và định dạng đúng thụt lề cho file .pyi."""
+def clean_type(type_str: str) -> str:
+    """Chuyển đổi kiểu C++/pybind11 sang kiểu Python chuẩn."""
+    type_str = type_str.replace("openfhe.", "")
+    type_str = type_str.replace("typing.SupportsInt | typing.SupportsIndex", "int")
+    type_str = type_str.replace("typing.SupportsFloat | typing.SupportsIndex", "float")
+    type_str = type_str.replace("collections.abc.Sequence", "List")
+    type_str = type_str.replace("NoneType", "None")
+    return type_str
+
+def parse_pybind_doc(doc: str, method_name: str, indent: str = "    "):
+    """Parse signature từ docstring pybind11 ra mã Python stub chuẩn."""
     if not doc:
-        return []
-    
+        return [f"{indent}def {method_name}(self, *args: Any, **kwargs: Any) -> Any: ...\n\n"]
+
     lines = doc.strip().splitlines()
-    # Nếu docstring ngắn (1 dòng)
-    if len(lines) == 1:
-        return [f'{indent}"""{lines[0]}"""\n']
+    signatures = []
     
-    # Nếu docstring nhiều dòng
-    result = [f'{indent}"""\n']
+    # Tìm các dòng chứa signature: Name(arg1: Type, ...) -> ReturnType
+    pattern = re.compile(rf"^\s*(?:\d+\.\s*)?{re.escape(method_name)}\((.*?)\)\s*->\s*(.+)$")
+
     for line in lines:
-        result.append(f'{indent}{line}\n' if line.strip() else '\n')
-    result.append(f'{indent}"""\n')
-    return result
+        match = pattern.match(line.strip())
+        if match:
+            args_raw, ret_type = match.groups()
+            ret_type = clean_type(ret_type.strip())
+            
+            # Phân tích từng tham số
+            args_list = []
+            if args_raw.strip():
+                # Tách tham số (tránh ngắt nhầm dấu phẩy nằm trong Union/List)
+                raw_params = re.split(r',\s*(?=[a-zA-Z_][a-zA-Z0-9_]*:)', args_raw)
+                for param in raw_params:
+                    if ':' in param:
+                        p_name, p_type = param.split(':', 1)
+                        p_name = p_name.strip()
+                        
+                        # Xử lý default value nếu có
+                        if '=' in p_type:
+                            p_type_only, default_val = p_type.split('=', 1)
+                            p_type = clean_type(p_type_only.strip())
+                            args_list.append(f"{p_name}: {p_type} = ...")
+                        else:
+                            p_type = clean_type(p_type.strip())
+                            args_list.append(f"{p_name}: {p_type}")
+                    else:
+                        args_list.append(param.strip())
+
+            # Chuẩn hóa self/cls
+            parsed_args = ", ".join(args_list)
+            parsed_args = parsed_args.replace("self: object", "self").replace(f"self: {method_name}", "self")
+            
+            signatures.append((parsed_args, ret_type))
+
+    if not signatures:
+        return [f"{indent}def {method_name}(self, *args: Any, **kwargs: Any) -> Any: ...\n\n"]
+
+    res_lines = []
+    # Nếu có nhiều hơn 1 signature -> Dùng @overload
+    is_overload = len(signatures) > 1
+
+    for args, ret in signatures:
+        if is_overload:
+            res_lines.append(f"{indent}@overload\n")
+        res_lines.append(f"{indent}def {method_name}({args}) -> {ret}: ...\n")
+    
+    res_lines.append("\n")
+    return res_lines
 
 def generate_stub():
-    out_path = "D:/Documents/UIT/FHE/homomorphic-encryption-with-machine-learning/src/lib/openfhe.pyi"
     lines = [
-        "# Auto-generated stub for OpenFHE Python Bindings\n",
-        "from typing import Any, List, Dict, Overload, Union\n\n"
+        "# Auto-generated typed stub for OpenFHE\n",
+        "from typing import Any, List, Dict, Overload, Union, overload\n\n"
     ]
 
     for name in sorted(dir(openfhe)):
         if name.startswith("__") and name != "__init__":
             continue
-        
-        try:
-            obj = getattr(openfhe, name)
-        except Exception:
+            
+        obj = getattr(openfhe, name, None)
+        if obj is None:
             continue
-        
-        # 1. Xử lý Class
+
         if inspect.isclass(obj):
             lines.append(f"class {name}:\n")
-            
-            # Docstring của Class
-            class_doc = inspect.getdoc(obj)
-            if class_doc:
-                lines.extend(format_docstring(class_doc, indent="    "))
-            
-            methods = [m for m in dir(obj) if not m.startswith("__") or m in ("__init__",)]
+            methods = [m for m in dir(obj) if not m.startswith("__") or m == "__init__"]
             if not methods:
                 lines.append("    pass\n\n")
                 continue
 
             for m_name in sorted(methods):
-                try:
-                    m_obj = getattr(obj, m_name, None)
-                    lines.append(f"    def {m_name}(self, *args: Any, **kwargs: Any) -> Any:\n")
-                    
-                    # Rút gọn docstring của method (lấy 10 dòng đầu để tránh trùng lặp rác)
-                    m_doc = inspect.getdoc(m_obj)
-                    if m_doc and m_doc != class_doc:
-                        short_doc = "\n".join(m_doc.strip().splitlines()[:10])
-                        lines.extend(format_docstring(short_doc, indent="        "))
-                        
-                    lines.append("        ...\n\n")
-                except Exception:
-                    lines.append("        ...\n\n")
+                m_obj = getattr(obj, m_name, None)
+                m_doc = inspect.getdoc(m_obj) if m_obj else ""
+                lines.extend(parse_pybind_doc(m_doc, m_name, indent="    "))
             lines.append("\n")
-            
-        # 2. Xử lý Function tự do
-        elif callable(obj):
-            lines.append(f"def {name}(*args: Any, **kwargs: Any) -> Any:\n")
-            f_doc = inspect.getdoc(obj)
-            if f_doc:
-                lines.extend(format_docstring(f_doc, indent="    "))
-            lines.append("    ...\n\n")
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
-        
-    print(f"Đã sinh file stub chuẩn format tại: {out_path}")
+
+    print(f" Thành công! Đã tạo Stub File có Type Hint chuẩn tại: {out_path}")
 
 if __name__ == "__main__":
     generate_stub()
