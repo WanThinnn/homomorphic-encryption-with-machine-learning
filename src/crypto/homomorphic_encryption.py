@@ -34,7 +34,8 @@ class FHEPipeline:
         self.vector_dim = vector_dim
         
         self.crypto_context = None
-        self.key_pair = None
+        self.public_key = None
+        self.private_key = None
         
         if OPENFHE_LOADED:
             self._init_context()
@@ -76,18 +77,19 @@ class FHEPipeline:
             raise ValueError("CryptoContext chưa được khởi tạo.")
             
         logger.info("Đang tạo cặp khóa Public / Private...")
-        self.key_pair = self.crypto_context.KeyGen()
-        
+        kp = self.crypto_context.KeyGen()
+        self.public_key = kp.publicKey
+        self.private_key = kp.secretKey
         logger.info("Đang tạo Khóa Relinearization (EvalMultKey) cho phép nhân...")
-        self.crypto_context.EvalMultKeyGen(self.key_pair.secretKey)
+        self.crypto_context.EvalMultKeyGen(self.private_key)
         
         logger.info("Đang tạo Khóa Rotation (EvalSumKey) cho phép tính tổng vector...")
         try:
-            self.crypto_context.EvalSumKeyGen(self.key_pair.secretKey)
+            self.crypto_context.EvalSumKeyGen(self.private_key)
         except Exception as e:
             logger.warning(f"Lỗi khi tạo EvalSumKey: {e}. Bạn có thể bỏ qua nếu không dùng EvalSum.")
             
-        return self.key_pair
+        return kp
         
     def _derive_key(self, pin: str, salt: bytes) -> bytes:
         """Sử dụng PBKDF2HMAC để dẫn xuất khóa 256-bit từ mã PIN."""
@@ -114,16 +116,18 @@ class FHEPipeline:
         
         # Lưu Public Key
         pub_path = os.path.join(secrets_dir, "public_key.bin")
-        openfhe.SerializeToFile(pub_path, self.key_pair.publicKey, openfhe.BINARY)
+        openfhe.SerializeToFile(pub_path, self.public_key, openfhe.BINARY)
         
-        # Lưu Private Key (tạm thời)
-        priv_temp_path = os.path.join(secrets_dir, "private_key.tmp")
-        openfhe.SerializeToFile(priv_temp_path, self.key_pair.secretKey, openfhe.BINARY)
+        # Lưu Eval Keys
+        mult_key_path = os.path.join(secrets_dir, "eval_mult_key.bin")
+        self.crypto_context.SerializeEvalMultKey(mult_key_path, openfhe.BINARY, "")
         
-        # Mã hóa Private Key bằng AES-GCM-256
-        with open(priv_temp_path, 'rb') as f:
-            priv_data = f.read()
-            
+        sum_key_path = os.path.join(secrets_dir, "eval_sum_key.bin")
+        self.crypto_context.SerializeEvalAutomorphismKey(sum_key_path, openfhe.BINARY, "")
+        
+        # Serialize Private Key thẳng vào RAM (dạng bytes)
+        priv_data = openfhe.Serialize(self.private_key, openfhe.BINARY)
+        
         salt = os.urandom(16)
         aes_key = self._derive_key(pin, salt)
         nonce = os.urandom(12)
@@ -135,9 +139,7 @@ class FHEPipeline:
         with open(priv_enc_path, 'wb') as f:
             f.write(salt + nonce + ciphertext)
             
-        # Xóa file tạm
-        os.remove(priv_temp_path)
-        logger.info(f"Đã lưu thành công và mã hóa Private Key vào {secrets_dir}/")
+        logger.info(f"Đã lưu thành công và mã hóa Private Key (in-memory) vào {secrets_dir}/")
 
     def load_keys(self, pin: str, secrets_dir: str = "secrets") -> bool:
         """Tải khóa từ đĩa, giải mã Private Key bằng AES-GCM."""
@@ -163,30 +165,35 @@ class FHEPipeline:
             aesgcm = AESGCM(aes_key)
             priv_data = aesgcm.decrypt(nonce, ciphertext, None)
             
-            priv_temp_path = os.path.join(secrets_dir, "private_key_dec.tmp")
-            with open(priv_temp_path, 'wb') as f:
-                f.write(priv_data)
-                
             # Đọc lại bằng OpenFHE (Deserialize)
             # Do Python wrapper của OpenFHE trả về tuple(Object, bool)
-            cc, ok1 = openfhe.DeserializeCryptoContext(os.path.join(secrets_dir, "cryptocontext.bin"), openfhe.SERBINARY)
-            pub, ok2 = openfhe.DeserializePublicKey(os.path.join(secrets_dir, "public_key.bin"), openfhe.SERBINARY)
-            priv, ok3 = openfhe.DeserializePrivateKey(priv_temp_path, openfhe.SERBINARY)
+            cc, ok1 = openfhe.DeserializeCryptoContext(os.path.join(secrets_dir, "cryptocontext.bin"), openfhe.BINARY)
+            pub, ok2 = openfhe.DeserializePublicKey(os.path.join(secrets_dir, "public_key.bin"), openfhe.BINARY)
             
-            if not (ok1 and ok2 and ok3):
+            # Load Private Key trực tiếp từ RAM
+            priv = openfhe.DeserializePrivateKeyString(priv_data, openfhe.BINARY)
+            
+            if not (ok1 and ok2 and priv):
                 raise Exception("Deserialize object failed")
                 
             self.crypto_context = cc
-            self.key_pair = openfhe.KeyPair(pub, priv)
+            self.public_key = pub
+            self.private_key = priv
             
-            os.remove(priv_temp_path)
-            logger.info("Đã giải mã và nạp Private Key thành công!")
+            # Load Eval Keys
+            mult_key_path = os.path.join(secrets_dir, "eval_mult_key.bin")
+            if os.path.exists(mult_key_path):
+                self.crypto_context.DeserializeEvalMultKey(mult_key_path, openfhe.BINARY)
+                
+            sum_key_path = os.path.join(secrets_dir, "eval_sum_key.bin")
+            if os.path.exists(sum_key_path):
+                self.crypto_context.DeserializeEvalAutomorphismKey(sum_key_path, openfhe.BINARY)
+            
+            logger.info("Đã giải mã và nạp Private Key (từ RAM) thành công!")
             return True
         except Exception as e:
             logger.error(f"Giải mã thất bại (Sai mã PIN, dữ liệu hỏng, hoặc format cũ): {e}")
-            if os.path.exists(os.path.join(secrets_dir, "private_key_dec.tmp")):
-                os.remove(os.path.join(secrets_dir, "private_key_dec.tmp"))
-            return False
+            raise ValueError("Sai mã PIN hoặc dữ liệu khóa bị hỏng!")
 
     def encrypt_vector(self, vector: List[float]) -> Any:
         """
@@ -196,7 +203,7 @@ class FHEPipeline:
             logger.warning(f"Mock: Đang mã hóa vector độ dài {len(vector)}")
             return "mock_ciphertext"
 
-        if not self.crypto_context or not self.key_pair:
+        if not self.crypto_context or not self.public_key:
             raise ValueError("CryptoContext hoặc Khóa bị thiếu. Hãy gọi generate_keys() trước.")
             
         if len(vector) != self.vector_dim:
@@ -205,9 +212,7 @@ class FHEPipeline:
         # Nén vector thành dạng Plaintext tương thích CKKS
         plaintext = self.crypto_context.MakeCKKSPackedPlaintext(vector)
         # Mã hóa bằng Public Key
-        ciphertext = self.crypto_context.Encrypt(self.key_pair.publicKey, plaintext)
-        
-        return ciphertext
+        return self.crypto_context.Encrypt(self.public_key, plaintext)
 
     def decrypt_vector(self, ciphertext: Any) -> List[float]:
         """
@@ -217,11 +222,11 @@ class FHEPipeline:
             logger.warning("Mock: Đang giải mã ciphertext")
             return [0.0] * self.vector_dim
 
-        if not self.crypto_context or not self.key_pair:
+        if not self.crypto_context or not self.private_key:
             raise ValueError("CryptoContext hoặc Khóa bị thiếu.")
             
         # Giải mã bằng Private Key
-        plaintext_result = self.crypto_context.Decrypt(ciphertext, self.key_pair.secretKey)
+        plaintext_result = self.crypto_context.Decrypt(ciphertext, self.private_key)
         
         # Chỉ lấy đúng số chiều cần thiết, loại bỏ các zero padding
         plaintext_result.SetLength(self.vector_dim)

@@ -41,10 +41,14 @@ def run_fhe_pipeline(pin: str):
     fhe = FHEPipeline(mult_depth=5, scale_mod_size=40, batch_size=0, vector_dim=vector_dim)
     
     # Nạp khóa
-    if not fhe.load_keys(pin, secrets_dir):
-        logger.warning("Không thể nạp khóa FHE (chưa có khóa hoặc sai định dạng). Đang tạo khóa mới...")
-        fhe.generate_keys()
-        fhe.save_keys(pin, secrets_dir)
+    try:
+        if not fhe.load_keys(pin, secrets_dir):
+            logger.warning("Chưa có khóa FHE. Đang tạo khóa mới...")
+            fhe.generate_keys()
+            fhe.save_keys(pin, secrets_dir)
+    except Exception as e:
+        logger.error(f"Dừng chương trình do lỗi nạp khóa: {e}")
+        sys.exit(1)
         
     # ==========================================
     # [CLIENT] MÃ HÓA
