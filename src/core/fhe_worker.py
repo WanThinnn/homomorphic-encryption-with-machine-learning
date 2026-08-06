@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import argparse
 import math
 
 # Thêm thư mục dự án vào sys.path để import được src...
@@ -20,7 +21,7 @@ from src.ml.linear_model import EncryptedLinearRegression
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - FHE_WORKER - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def run_fhe_pipeline(pin: str):
+def run_fhe_pipeline(pin: str, model_name: str):
     secrets_dir = os.path.join(src_dir, "secrets")
     models_dir = os.path.join(src_dir, "ml", "models")
     tmp_dir = os.path.join(base_dir, "tmp")
@@ -67,7 +68,7 @@ def run_fhe_pipeline(pin: str):
     # [SERVER] INFERENCE TRÊN DỮ LIỆU MÃ HÓA
     # ==========================================
     logger.info("[SERVER] Đang nạp Trọng số (Weights) từ mô hình thật...")
-    weights_path = os.path.join(models_dir, "weights.json")
+    weights_path = os.path.join(models_dir, model_name, "weights.json")
     with open(weights_path, 'r', encoding='utf-8') as f:
         model_data = json.load(f)
         weights = model_data['weights']
@@ -95,8 +96,9 @@ def run_fhe_pipeline(pin: str):
     logger.info("[CLIENT] Hoàn tất! Đã lưu kết quả giải mã.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: fhe_worker.py <pin>")
-        sys.exit(1)
-    pin = sys.argv[1]
-    run_fhe_pipeline(pin)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pin", type=str, required=True)
+    parser.add_argument("--model", type=str, required=True)
+    args = parser.parse_args()
+    
+    run_fhe_pipeline(args.pin, args.model)

@@ -11,13 +11,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class LogisticRegressionClientModel:
-    def __init__(self, models_dir):
+    def __init__(self, models_dir, model_name):
         self.vocab = []
         self.categories = []
         self.idf = []
         
-        vocab_path = os.path.join(models_dir, "vocab.json")
-        weights_path = os.path.join(models_dir, "weights.json")
+        vocab_path = os.path.join(models_dir, model_name, "vocab.json")
+        weights_path = os.path.join(models_dir, model_name, "weights.json")
         
         if not os.path.exists(vocab_path) or not os.path.exists(weights_path):
             raise FileNotFoundError("Không tìm thấy model thật. Hãy chạy src/ml/download_model.py trước.")
@@ -39,7 +39,8 @@ class LogisticRegressionClientModel:
         vectorizer = TfidfVectorizer(vocabulary=self.vocab, stop_words='english')
         # Hack để bypass việc fit
         vectorizer.fit(["dummy"]) 
-        vectorizer.idf_ = self.idf
+        import numpy as np
+        vectorizer.idf_ = np.array(self.idf)
         
         # Chuyển đổi văn bản thành vector
         vector = vectorizer.transform([text]).toarray()[0].tolist()
