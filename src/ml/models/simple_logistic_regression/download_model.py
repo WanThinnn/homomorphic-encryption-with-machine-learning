@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def prepare_pretrained_model():
-    models_dir = os.path.join(os.path.dirname(__file__), "models")
+    models_dir = os.path.dirname(__file__)
     os.makedirs(models_dir, exist_ok=True)
     
     logger.info("Đang tạo bộ dữ liệu chủ đề (Y tế vs Công nghệ)...")

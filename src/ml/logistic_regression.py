@@ -2,6 +2,7 @@ import os
 import json
 import math
 import logging
+from typing import List, Any
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -68,3 +69,49 @@ class LogisticRegressionClientModel:
             print(f"\n=> KẾT LUẬN: Văn bản thuộc chủ đề: {self.categories[1].upper()}!")
         else:
             print(f"\n=> KẾT LUẬN: Văn bản thuộc chủ đề: {self.categories[0].upper()}!")
+
+
+class LogisticRegressionServerModel:
+    """
+    Mô hình Logistic Regression hoạt động trên dữ liệu đã được mã hóa bằng FHE (Phía Server).
+    Thực chất là phép toán Linear Regression (W*X + B), phần phi tuyến tính (Sigmoid/Argmax) được xử lý ở Client.
+    """
+    def __init__(self, weights: List[float], bias: float):
+        self.weights = weights
+        self.bias = bias
+        self.encoded_weights = None
+        self.encoded_bias = None
+        
+        logger.info(f"Khởi tạo mô hình Logistic Regression (Server) với {len(weights)} features.")
+
+    def precompute(self, fhe_pipeline: Any):
+        """
+        Chuẩn bị trước các tham số mô hình thành định dạng Plaintext của FHE.
+        """
+        if not hasattr(fhe_pipeline, 'encode_vector'):
+            logger.warning("FHEPipeline không hỗ trợ encode_vector, chạy ở chế độ mock?")
+            return
+            
+        self.encoded_weights = fhe_pipeline.encode_vector(self.weights)
+        bias_vector = [self.bias] * len(self.weights)
+        self.encoded_bias = fhe_pipeline.encode_vector(bias_vector)
+        logger.info("Đã pre-compute weights và bias sang định dạng Plaintext.")
+
+    def predict_encrypted(self, encrypted_input: Any, fhe_pipeline: Any) -> Any:
+        """
+        Thực hiện dự đoán trực tiếp trên dữ liệu mã hóa (Ciphertext).
+        Phép toán: Y = Sum(W * X) + B
+        """
+        if not self.encoded_weights or not self.encoded_bias:
+            self.precompute(fhe_pipeline)
+            
+        logger.info("Đang tính toán: W * X (Element-wise multiplication)...")
+        mult_result = fhe_pipeline.eval_mult(encrypted_input, self.encoded_weights)
+        
+        logger.info("Đang tính toán: Sum(W * X)...")
+        sum_result = fhe_pipeline.eval_sum(mult_result)
+        
+        logger.info("Đang tính toán: Sum + B...")
+        final_result = fhe_pipeline.eval_add(sum_result, self.encoded_bias)
+        
+        return final_result

@@ -16,7 +16,7 @@ if sys.platform != 'linux':
     sys.path.append(os.path.join(src_dir, "lib"))
 
 from src.crypto.homomorphic_encryption import FHEPipeline
-from src.ml.linear_model import EncryptedLinearRegression
+from src.ml.logistic_regression import LogisticRegressionServerModel
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - FHE_WORKER - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ def run_fhe_pipeline(pin: str, model_name: str):
         weights = model_data['weights']
         bias = model_data['bias']
         
-    model = EncryptedLinearRegression(weights=weights, bias=bias)
+    model = LogisticRegressionServerModel(weights=weights, bias=bias)
     model.precompute(fhe)
     
     logger.info("[SERVER] Đang tính toán Hồi quy tuyến tính trên Ciphertext...")
