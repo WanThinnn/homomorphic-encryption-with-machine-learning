@@ -107,3 +107,4 @@ src/models/securebert-2
 logs/*
 *_plan.md
 .agents/*
+./src/ml/models/
