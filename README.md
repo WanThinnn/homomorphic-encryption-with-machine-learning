@@ -16,20 +16,33 @@ By integrating FHE into Machine Learning (ML) and Deep Learning (DL), we can ach
 - Privacy-Preserving Inference: A client encrypts their raw data and sends the ciphertext to an AI server. The server runs its ML model (e.g., Logistic Regression, Neural Networks) directly on the encrypted data. The server returns an encrypted prediction, which only the client can decrypt. The server learns nothing about the input data or the result.
 - Secure Data Handling: FHE is resistant to quantum computing attacks (lattice-based cryptography) and guarantees that even if the server is compromised or malicious, the underlying data remains mathematically secure.
 
-This project specifically utilizes the CKKS scheme (Cheon-Kim-Kim-Song), which is highly optimized for approximate arithmetic on real and complex numbers, making it the industry standard for privacy-preserving Machine Learning.
+This project utilizes two state-of-the-art FHE backends:
+1. **OpenFHE (CKKS Scheme)**: Highly optimized for approximate arithmetic on real and complex numbers. Used primarily for evaluating linear combinations on encrypted text vectors.
+2. **Concrete ML (TFHE Scheme)**: Built by Zama, this scheme supports exact boolean/integer arithmetic and table lookups (Programmable Bootstrapping). It enables fast evaluation of non-linear models like Decision Trees (XGBoost) and Neural Networks on encrypted data using Quantization.
 
 ## Project Structure and Technologies
 
-The architecture separates the Machine Learning workflow (using standard libraries like Scikit-Learn) from the FHE execution engine.
+The architecture separates the Machine Learning workflow from the FHE execution engine, offering a unified **Dual-Backend CLI**:
 
-- Client Side: Uses standard System Python to train models, extract weights (Plaintext), and prepare data (TF-IDF vectorization).
-- Server Side / Worker: Utilizes OpenFHE (a leading open-source FHE library written in C++) via Python bindings to execute linear combinations and matrix multiplications entirely on ciphertext.
+- **Client Side**: Uses standard System Python to prepare data (e.g., TF-IDF vectorization or Quantization) and generate encryption keys.
+- **Server Side / Worker**: Runs an isolated subprocess to execute matrix multiplications or non-linear functions entirely on ciphertext, completely blind to the underlying data.
+
+### Dual-Backend Usage
+You can run the Blind A.I. pipeline using the unified CLI:
+```bash
+# Run with OpenFHE backend (CKKS - Linear Models)
+python3 src/main.py --model simple_logistic_regression --platform openfhe
+
+# Run with Concrete ML backend (TFHE - Non-linear Models like XGBoost)
+python3 src/main.py --model concrete_pretrained --platform concrete
+```
+*(Note: Concrete ML requires a Linux/WSL environment)*
 
 ## Dependencies (src/lib)
 
 To bridge the gap between high-performance C++ lattice cryptography and Python, this project bundles several compiled dynamic link libraries (DLLs) built via MinGW-w64 in the src/lib directory.
 
-### Core OpenFHE Libraries
+### Core OpenFHE Libraries (for CKKS Backend)
 - libOPENFHEcore.dll: The foundational module handling lattice parameters, math backends, and serialization.
 - libOPENFHEpke.dll: The Public Key Encryption module implementing modern FHE schemes like CKKS, BFV, and BGV.
 - libOPENFHEbinfhe.dll: The Boolean FHE module for encrypted boolean logic circuits.
@@ -44,4 +57,7 @@ FHE requires heavy polynomial arithmetic over extremely large integers (often ex
 - libgomp-1.dll / libwinpthread-1.dll: GNU OpenMP and POSIX thread libraries used to parallelize and accelerate heavy polynomial multiplications across multiple CPU cores.
 
 ### Python Bindings
-- openfhe.pyd: The PyBind11 compiled wrapper that exposes the underlying C++ OpenFHE classes (like CryptoContext, Ciphertext, and Plaintext) natively to Python.
+- openfhe.pyd: The PyBind11 compiled wrapper that exposes the underlying C++ OpenFHE classes (like CryptoContext, Ciphertext, and Plaintext) natively to Python on Windows.
+
+## Concrete ML (Zama) Dependency
+For the TFHE backend, this project leverages `concrete-ml`, an open-source framework by Zama built on top of `concrete-python` and the `tfhe-rs` Rust compiler. It allows compiling standard Scikit-Learn (e.g., XGBoost, Logistic Regression) and PyTorch models directly into FHE circuits. Because it relies heavily on LLVM and Rust toolchains, it is currently supported exclusively on Linux/WSL environments.
