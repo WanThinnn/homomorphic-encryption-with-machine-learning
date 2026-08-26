@@ -3,17 +3,22 @@ import sys
 import logging
 import argparse
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 try:
     from concrete.ml.deployment import FHEModelServer
 except ImportError:
     print("Vui lòng cài đặt concrete-ml trên Linux/WSL (pip install concrete-ml)")
     sys.exit(1)
 
+from fhe_io import read_concrete_batch, write_blob_list
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - CONCRETE_WORKER - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def main(model_name):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
     src_dir = os.path.dirname(current_dir)
     base_dir = os.path.dirname(src_dir)
     
@@ -24,33 +29,28 @@ def main(model_name):
         logger.error("Không tìm thấy server.zip trong thư mục deployment!")
         sys.exit(1)
         
-    logger.info("[SERVER] Đang khởi tạo FHE Server (TFHE) từ tệp Deployment...")
+    logger.info("[SERVER] Đang khởi tạo FHE Server (TFHE) từ tệp Deployment (1 lần)...")
     server = FHEModelServer(deploy_dir)
     
-    enc_data_path = os.path.join(tmp_dir, "concrete_enc_data.bin")
-    eval_keys_path = os.path.join(tmp_dir, "concrete_eval_keys.bin")
-    
-    if not os.path.exists(enc_data_path) or not os.path.exists(eval_keys_path):
-        logger.error("Chưa nhận được Dữ liệu mã hóa hoặc Evaluation Keys từ Client!")
+    batch_path = os.path.join(tmp_dir, "concrete_enc_batch.bin")
+    if not os.path.exists(batch_path):
+        logger.error("Chưa nhận được batch ciphertext từ Client!")
         sys.exit(1)
-        
-    logger.info("[SERVER] Đang nạp Dữ liệu và Evaluation Keys...")
-    with open(enc_data_path, 'rb') as f:
-        encrypted_data = f.read()
-        
-    with open(eval_keys_path, 'rb') as f:
-        serialized_evaluation_keys = f.read()
-        
-    logger.info("[SERVER] Bắt đầu tính toán Inference trên Ciphertext (Bằng Mạch FHE TFHE)...")
-    # Bước này hoàn toàn không giải mã dữ liệu, thực hiện tính toán mù hoàn toàn
-    encrypted_result = server.run(encrypted_data, serialized_evaluation_keys)
+
+    eval_keys, payloads = read_concrete_batch(batch_path)
+    if not payloads:
+        logger.error("Batch ciphertext rỗng.")
+        sys.exit(1)
+
+    logger.info("[SERVER] Inference %d ciphertext trên server đã nạp sẵn...", len(payloads))
+    results = []
+    for idx, encrypted_data in enumerate(payloads, start=1):
+        logger.info("[SERVER] Mẫu %d/%d...", idx, len(payloads))
+        results.append(server.run(encrypted_data, eval_keys))
     
-    logger.info("[SERVER] Đã tính toán xong. Lưu kết quả mã hóa...")
-    result_path = os.path.join(tmp_dir, "concrete_enc_result.bin")
-    with open(result_path, 'wb') as f:
-        f.write(encrypted_result)
-        
-    logger.info("[SERVER] Hoàn tất!")
+    result_path = os.path.join(tmp_dir, "concrete_enc_results.bin")
+    write_blob_list(result_path, results)
+    logger.info("[SERVER] Hoàn tất! Đã lưu %d kết quả mã hóa.", len(results))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

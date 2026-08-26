@@ -17,6 +17,13 @@ def main():
     parser = argparse.ArgumentParser(description="Chạy Client cho mô hình FHE.")
     parser.add_argument("--model", type=str, required=True, help="Tên thư mục mô hình (vd: simple_logistic_regression, pretrained_xgb)")
     parser.add_argument("--platform", type=str, default="concrete_ml", choices=["concrete_ml", "openfhe", "none"], help="Nền tảng FHE (concrete, openfhe, hoặc none)")
+    parser.add_argument("--log-file", type=str, default=None, help="Đường dẫn đến file log Suricata JSON để dự đoán production")
+    parser.add_argument(
+        "--max-logs",
+        type=int,
+        default=16,
+        help="Số record Suricata tối đa cho 1 lần FHE (0 = tất cả). Mặc định 16.",
+    )
     args = parser.parse_args()
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,12 +66,44 @@ def main():
     print(f"Mô hình đã nạp: {args.model} | Nền tảng: {platform.upper()}")
     print(model.get_prompt_info())
     
-    text = input("\nNhập dữ liệu (văn bản) cần phân loại: ")
-    if not text.strip():
-        text = "I love learning about artificial intelligence and space exploration."
-        print(f"Mặc định sử dụng: '{text}'")
+    # -------------------------------------------------------------
+    # LOGIC XỬ LÝ INPUT
+    # -------------------------------------------------------------
+    client_payload = None
+    batch_meta = None
+
+    if args.log_file and args.model == "unsw_nb15_xgb":
+        logger.info(f"Đọc dữ liệu từ Suricata Log: {args.log_file}")
+        from core.suricata_parser import SuricataParser
         
-    client_payload = model.prepare_input(text)
+        parser = SuricataParser(feature_names=model.feature_names)
+        max_records = None if args.max_logs == 0 else args.max_logs
+        parsed_records = parser.parse_log(args.log_file, max_records=max_records)
+        
+        if not parsed_records:
+            logger.error("Không tìm thấy dòng log hợp lệ nào trong file.")
+            sys.exit(1)
+            
+        logger.info(f"Sẽ chạy FHE inference trên {len(parsed_records)} record (server nạp 1 lần).")
+        batch_meta = [
+            {
+                "src_ip": rec["original_log"].get("src_ip"),
+                "dest_ip": rec["original_log"].get("dest_ip"),
+                "event_type": rec["original_log"].get("event_type"),
+            }
+            for rec in parsed_records
+        ]
+        client_payload = model.prepare_suricata_inputs(
+            [rec["features"] for rec in parsed_records]
+        )
+    else:
+        # Interactive Mode: Nhập từ bàn phím
+        text = input("\nNhập dữ liệu (văn bản) cần phân loại: ")
+        if not text.strip():
+            text = "I love learning about artificial intelligence and space exploration."
+            print(f"Mặc định sử dụng: '{text}'")
+            
+        client_payload = model.prepare_input(text)
         
     if platform == "openfhe":
         pin = getpass.getpass("Nhập mã PIN của bạn (để giải mã kết quả): ")
@@ -84,16 +123,19 @@ def main():
         worker_args = [python_executable, worker_script, "--pin", pin, "--model", args.model]
         
     elif platform == "concrete_ml":
-        # Concrete ML lưu binary thay vì json
-        enc_data_path = os.path.join(tmp_dir, "concrete_enc_data.bin")
-        eval_keys_path = os.path.join(tmp_dir, "concrete_eval_keys.bin")
-        
-        with open(enc_data_path, 'wb') as f:
-            f.write(client_payload["concrete_enc_data"])
-        with open(eval_keys_path, 'wb') as f:
-            f.write(client_payload["concrete_eval_keys"])
+        from core.fhe_io import write_concrete_batch, read_blob_list
+
+        enc_payloads = client_payload["concrete_enc_data"]
+        if isinstance(enc_payloads, (bytes, bytearray)):
+            enc_payloads = [enc_payloads]
+
+        batch_path = os.path.join(tmp_dir, "concrete_enc_batch.bin")
+        write_concrete_batch(batch_path, client_payload["concrete_eval_keys"], enc_payloads)
             
-        logger.info("Gửi dữ liệu sang FHE Server để tính toán ẩn danh (Concrete ML TFHE)...")
+        logger.info(
+            "Gửi %d ciphertext sang FHE Server (Concrete ML TFHE, 1 process)...",
+            len(enc_payloads),
+        )
         python_executable = sys.executable
         worker_script = os.path.join(base_dir, "core", "concrete_worker.py")
         worker_args = [python_executable, worker_script, "--model", args.model]
@@ -114,15 +156,14 @@ def main():
             result_data = json.load(f)
             
     elif platform == "concrete_ml":
-        result_path = os.path.join(tmp_dir, "concrete_enc_result.bin")
+        result_path = os.path.join(tmp_dir, "concrete_enc_results.bin")
         if not os.path.exists(result_path):
             logger.error("Không nhận được kết quả từ Concrete Worker.")
             sys.exit(1)
             
-        with open(result_path, 'rb') as f:
-            result_data = {"concrete_enc_result": f.read()}
+        result_data = {"concrete_enc_results": read_blob_list(result_path)}
             
-    model.interpret_result(result_data)
+    model.interpret_result(result_data, batch_meta=batch_meta)
 
 if __name__ == "__main__":
     main()

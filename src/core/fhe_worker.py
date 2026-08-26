@@ -36,16 +36,15 @@ def run_fhe_pipeline(pin: str, model_name: str):
         data = json.load(f)
         vector = data['vector']
         
-    # Khởi tạo FHE
-    # Chú ý: vector_dim phải khớp với max_features của Vectorizer (ở đây là 256)
+    # LR chỉ cần 1 phép nhân CKKS (W*X); depth 2 đủ cho EvalMult + margin.
     vector_dim = len(vector)
-    logger.info(f"Khởi tạo FHEPipeline với vector_dim={vector_dim} (batch_size=0 full packing)")
-    fhe = FHEPipeline(mult_depth=5, scale_mod_size=40, batch_size=0, vector_dim=vector_dim)
+    logger.info(f"Khởi tạo FHEPipeline với vector_dim={vector_dim} (CKKS packing, mult_depth=2)")
+    fhe = FHEPipeline(mult_depth=2, scale_mod_size=40, batch_size=0, vector_dim=vector_dim, init_context=False)
     
-    # Nạp khóa
     try:
         if not fhe.load_keys(pin, secrets_dir):
             logger.warning("Chưa có khóa FHE. Đang tạo khóa mới...")
+            fhe._init_context()
             fhe.generate_keys()
             fhe.save_keys(pin, secrets_dir)
     except Exception as e:

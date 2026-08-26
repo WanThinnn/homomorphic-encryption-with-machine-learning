@@ -34,7 +34,7 @@ You can run the Blind A.I. pipeline using the unified CLI:
 python3 src/main.py --model simple_logistic_regression --platform openfhe
 
 # Run with Concrete ML backend (TFHE - Non-linear Models like XGBoost)
-python3 src/main.py --model concrete_pretrained --platform concrete
+python3 src/main.py --model concrete_pretrained --platform concrete_ml
 ```
 *(Note: Concrete ML requires a Linux/WSL environment)*
 

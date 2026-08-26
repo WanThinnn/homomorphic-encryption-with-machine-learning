@@ -27,7 +27,14 @@ class FHEPipeline:
     Phục vụ cho việc mã hóa Graph Vector 256D trước khi gửi lên Cloud SOC.
     """
 
-    def __init__(self, mult_depth: int = 5, scale_mod_size: int = 40, batch_size: int = 0, vector_dim: int = 256):
+    def __init__(
+        self,
+        mult_depth: int = 2,
+        scale_mod_size: int = 40,
+        batch_size: int = 0,
+        vector_dim: int = 256,
+        init_context: bool = True,
+    ):
         self.mult_depth = mult_depth
         self.scale_mod_size = scale_mod_size
         self.batch_size = batch_size
@@ -38,7 +45,8 @@ class FHEPipeline:
         self.private_key = None
         
         if OPENFHE_LOADED:
-            self._init_context()
+            if init_context:
+                self._init_context()
         else:
             logger.warning("FHEPipeline khởi tạo trong trạng thái MOCK (OpenFHE chưa được nạp).")
 

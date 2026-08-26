@@ -114,10 +114,48 @@ class UNSWNB15ClientModel:
 
         # Khởi tạo FHE Client
         self.client = FHEModelClient(self.deploy_dir, key_dir=self.key_dir)
+        self._eval_keys = None
 
-        # Sinh khóa FHE
         logger.info("Đang nạp/tạo FHE Keys cho Concrete ML (UNSW-NB15)...")
-        self.client.generate_private_and_evaluation_keys()
+        try:
+            self.client.generate_private_and_evaluation_keys(force=False)
+        except TypeError:
+            self.client.generate_private_and_evaluation_keys()
+
+    def _get_eval_keys(self):
+        if self._eval_keys is None:
+            self._eval_keys = self.client.get_serialized_evaluation_keys()
+        return self._eval_keys
+
+    def _encrypt_vectors(self, input_vectors):
+        payloads = []
+        total = len(input_vectors)
+        for i in range(total):
+            if total > 1:
+                logger.info("Mã hóa mẫu %d/%d (Quantize + Encrypt + Serialize)...", i + 1, total)
+            payloads.append(self.client.quantize_encrypt_serialize(input_vectors[i:i + 1]))
+        return {
+            "concrete_enc_data": payloads,
+            "concrete_eval_keys": self._get_eval_keys(),
+        }
+
+    def _features_to_vector(self, parsed_features):
+        parsed = dict(parsed_features)
+        for col in self.categorical_cols:
+            val = str(parsed.get(col, '')).lower()
+            if col in self.label_encoders:
+                classes = self.label_encoders[col]['classes']
+                if val in classes:
+                    parsed[col] = classes.index(val)
+                else:
+                    parsed[col] = classes.index('unknown') if 'unknown' in classes else 0
+            else:
+                parsed[col] = 0
+
+        values = [parsed.get(col, 0.0) for col in self.feature_names]
+        input_vector = np.array([values], dtype=np.float32)
+        input_vector = (input_vector - self.scaler_mean) / self.scaler_scale
+        return input_vector.astype(np.float32)
 
     def get_prompt_info(self):
         """Trả về thông tin mô hình để hiển thị."""
@@ -211,62 +249,69 @@ class UNSWNB15ClientModel:
 
         logger.info(f"Vector input shape: {input_vector.shape}")
         logger.info("Mã hóa đầu vào với khóa bảo mật (Quantize + Encrypt + Serialize)...")
+        return self._encrypt_vectors(input_vector)
 
-        # Quantize, Encrypt và Serialize thành bytes
-        encrypted_data = self.client.quantize_encrypt_serialize(input_vector)
-        serialized_evaluation_keys = self.client.get_serialized_evaluation_keys()
+    def prepare_suricata_input(self, parsed_features):
+        """Mã hóa 1 record Suricata (giữ tương thích)."""
+        return self.prepare_suricata_inputs([parsed_features])
 
-        return {
-            "concrete_enc_data": encrypted_data,
-            "concrete_eval_keys": serialized_evaluation_keys
-        }
+    def prepare_suricata_inputs(self, parsed_features_list):
+        """Mã hóa nhiều record Suricata; eval keys chỉ serialize 1 lần."""
+        vectors = [self._features_to_vector(feat) for feat in parsed_features_list]
+        input_vectors = np.vstack(vectors)
+        logger.info("Mã hóa %d record Suricata (eval keys reuse)...", len(input_vectors))
+        return self._encrypt_vectors(input_vectors)
 
-    def interpret_result(self, result_data):
-        """Giải mã và hiển thị kết quả phân loại từ FHE Server."""
-        logger.info("Đang giải mã kết quả từ FHE Server...")
+    def _decode_prediction(self, enc_result):
+        decrypted_prediction = self.client.deserialize_decrypt_dequantize(enc_result)
+        raw_output = decrypted_prediction[0]
+        if len(raw_output) >= 2:
+            pred_class = int(np.argmax(raw_output))
+            prob_normal = float(raw_output[0])
+            prob_attack = float(raw_output[1])
+        else:
+            pred_class = int(raw_output[0] > 0.5) if len(raw_output) == 1 else 0
+            prob_normal = float(1 - raw_output[0]) if len(raw_output) == 1 else 0.0
+            prob_attack = float(raw_output[0]) if len(raw_output) == 1 else 0.0
+        return pred_class, prob_normal, prob_attack, raw_output
 
-        if "concrete_enc_result" not in result_data:
+    def interpret_result(self, result_data, batch_meta=None):
+        """Giải mã và hiển thị kết quả (1 mẫu hoặc batch)."""
+        enc_results = result_data.get("concrete_enc_results")
+        if enc_results is None and "concrete_enc_result" in result_data:
+            enc_results = [result_data["concrete_enc_result"]]
+        if not enc_results:
             logger.error("Không tìm thấy kết quả hợp lệ!")
             return
 
-        enc_result = result_data["concrete_enc_result"]
-
-        # Giải mã và Dequantize
-        decrypted_prediction = self.client.deserialize_decrypt_dequantize(enc_result)
+        logger.info("Đang giải mã %d kết quả từ FHE Server...", len(enc_results))
+        decoded = [self._decode_prediction(blob) for blob in enc_results]
+        attack_count = sum(1 for pred, *_ in decoded if pred == 1)
 
         print("")
         print("=" * 60)
         print(" 🛡️  KẾT QUẢ PHÁT HIỆN XÂM NHẬP MẠNG (FHE - Encrypted)")
         print("=" * 60)
+        print(f" Số mẫu      : {len(decoded)}")
+        print(f" Normal      : {len(decoded) - attack_count}")
+        print(f" Attack      : {attack_count}")
+        print("-" * 60)
 
-        # XGBClassifier trả về xác suất cho mỗi class
-        raw_output = decrypted_prediction[0]
-        print(f" Xác suất thô (sau giải mã): {raw_output}")
-
-        if len(raw_output) >= 2:
-            prob_normal = raw_output[0]
-            prob_attack = raw_output[1]
-            pred_class = np.argmax(raw_output)
-        else:
-            # Trường hợp output là scalar
-            pred_class = int(raw_output[0] > 0.5) if len(raw_output) == 1 else 0
-            prob_normal = 1 - raw_output[0] if len(raw_output) == 1 else 0
-            prob_attack = raw_output[0] if len(raw_output) == 1 else 0
-
-        print(f" Xác suất Normal : {prob_normal:.4f}")
-        print(f" Xác suất Attack : {prob_attack:.4f}")
-        print("")
-
-        if pred_class == 0:
-            print(" ✅ KẾT LUẬN: TRAFFIC BÌNH THƯỜNG (Normal)")
-            print("    Không phát hiện dấu hiệu xâm nhập đáng ngờ.")
-        else:
-            print(" 🚨 KẾT LUẬN: PHÁT HIỆN XÂM NHẬP (Attack Detected!)")
-            print("    Cảnh báo: Traffic này có dấu hiệu tấn công mạng!")
-            print("    Đề xuất: Kiểm tra chi tiết nguồn gốc và nội dung kết nối.")
+        for idx, (pred_class, prob_normal, prob_attack, raw_output) in enumerate(decoded, start=1):
+            meta = {}
+            if batch_meta and idx - 1 < len(batch_meta):
+                meta = batch_meta[idx - 1]
+            src = meta.get("src_ip", "?")
+            dst = meta.get("dest_ip", "?")
+            event_type = meta.get("event_type", "?")
+            label = "ATTACK" if pred_class == 1 else "NORMAL"
+            print(
+                f" [{idx:03d}] {label:6s}  N={prob_normal:.4f} A={prob_attack:.4f}"
+                f"  {src} -> {dst}  ({event_type})"
+            )
+            if len(decoded) == 1:
+                print(f"       Xác suất thô: {raw_output}")
 
         print("")
-        print(" ℹ️  Lưu ý: Toàn bộ quá trình inference được thực hiện trên")
-        print("    dữ liệu đã mã hóa (FHE). Server KHÔNG biết nội dung")
-        print("    input hay kết quả — chỉ Client mới có thể giải mã.")
+        print(" ℹ️  Inference chạy trên ciphertext. Server không thấy input/kết quả.")
         print("=" * 60)

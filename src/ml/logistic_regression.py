@@ -3,6 +3,7 @@ import json
 import math
 import logging
 from typing import List, Any
+import numpy as np
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -31,23 +32,20 @@ class LogisticRegressionClientModel:
         with open(weights_path, 'r', encoding='utf-8') as f:
             weight_data = json.load(f)
             self.categories = weight_data['categories']
+
+        self._vectorizer = TfidfVectorizer(vocabulary=self.vocab, stop_words='english')
+        self._vectorizer.fit(["dummy"])
+        self._vectorizer.idf_ = np.array(self.idf)
             
     def get_prompt_info(self):
         return f"Phân loại giữa [{self.categories[0]}] và [{self.categories[1]}]"
 
     def prepare_input(self, text):
         logger.info("Đang Vector hóa văn bản (TF-IDF)...")
-        vectorizer = TfidfVectorizer(vocabulary=self.vocab, stop_words='english')
-        # Hack để bypass việc fit
-        vectorizer.fit(["dummy"]) 
-        import numpy as np
-        vectorizer.idf_ = np.array(self.idf)
-        
-        # Chuyển đổi văn bản thành vector
-        vector = vectorizer.transform([text]).toarray()[0].tolist()
+        vector = self._vectorizer.transform([text]).toarray()[0].tolist()
         return vector
 
-    def interpret_result(self, raw_result):
+    def interpret_result(self, raw_result, batch_meta=None):
         # Result from server is a dict with 'logit'
         logit = raw_result.get('logit', 0.0)
         
