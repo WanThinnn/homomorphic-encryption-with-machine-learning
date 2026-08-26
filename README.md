@@ -38,6 +38,28 @@ python3 src/main.py --model concrete_pretrained --platform concrete
 ```
 *(Note: Concrete ML requires a Linux/WSL environment)*
 
+### 🛡️ Use Case: Network Intrusion Detection (UNSW-NB15)
+This project includes a real-world cybersecurity use case: **privacy-preserving network intrusion detection** using the [UNSW-NB15 dataset](https://huggingface.co/datasets/rdpahalavan/UNSW-NB15) from Hugging Face.
+
+**Scenario (SOC Context):** A Security Operations Center (SOC) needs to analyze network traffic flows to detect intrusion attempts. However, the raw network data contains sensitive information (IP addresses, ports, traffic patterns) that must remain confidential. Using FHE, the SOC can outsource the ML inference to a cloud server without exposing any of the actual traffic data.
+
+**Step 1: Train & Compile the Model (Linux/WSL)**
+```bash
+# Download UNSW-NB15 from HuggingFace, train XGBoost, compile to FHE circuit
+python3 src/ml/train_unsw_nb15.py
+
+# Optional: Customize sample size for faster compilation
+python3 src/ml/train_unsw_nb15.py --n-samples 5000
+```
+
+**Step 2: Run FHE Inference**
+```bash
+# Run the privacy-preserving intrusion detection pipeline
+python3 src/main.py --model unsw_nb15_xgb --platform concrete_ml
+```
+
+The model classifies network flows as **Normal** or **Attack** using 49 features (flow statistics, protocol metadata, TCP characteristics, etc.) — all computed entirely on encrypted data.
+
 ## Dependencies (src/lib)
 
 To bridge the gap between high-performance C++ lattice cryptography and Python, this project bundles several compiled dynamic link libraries (DLLs) built via MinGW-w64 in the src/lib directory.

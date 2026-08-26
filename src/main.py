@@ -42,8 +42,13 @@ def main():
             logger.error("Concrete ML BẮT BUỘC phải được chạy trên WSL/Linux!")
             sys.exit(1)
         try:
-            from ml.concrete_pretrained import ConcretePretrainedClientModel
-            model = ConcretePretrainedClientModel(models_dir, model_name=args.model)
+            # Sử dụng Client Model chuyên biệt cho UNSW-NB15 (Intrusion Detection)
+            if args.model == "unsw_nb15_xgb":
+                from ml.unsw_nb15_client import UNSWNB15ClientModel
+                model = UNSWNB15ClientModel(models_dir, model_name=args.model)
+            else:
+                from ml.concrete_pretrained import ConcretePretrainedClientModel
+                model = ConcretePretrainedClientModel(models_dir, model_name=args.model)
         except Exception as e:
             logger.error(f"Lỗi khởi tạo mô hình Concrete: {e}")
             sys.exit(1)
@@ -78,7 +83,7 @@ def main():
         worker_script = os.path.join(base_dir, "core", "fhe_worker.py")
         worker_args = [python_executable, worker_script, "--pin", pin, "--model", args.model]
         
-    elif platform == "concrete":
+    elif platform == "concrete_ml":
         # Concrete ML lưu binary thay vì json
         enc_data_path = os.path.join(tmp_dir, "concrete_enc_data.bin")
         eval_keys_path = os.path.join(tmp_dir, "concrete_eval_keys.bin")
@@ -108,7 +113,7 @@ def main():
         with open(result_path, 'r', encoding='utf-8') as f:
             result_data = json.load(f)
             
-    elif platform == "concrete":
+    elif platform == "concrete_ml":
         result_path = os.path.join(tmp_dir, "concrete_enc_result.bin")
         if not os.path.exists(result_path):
             logger.error("Không nhận được kết quả từ Concrete Worker.")
