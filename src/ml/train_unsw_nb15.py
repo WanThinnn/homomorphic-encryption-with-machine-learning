@@ -34,6 +34,15 @@ def main(model_name, n_samples=10000):
         from concrete.ml.sklearn import XGBClassifier
         from concrete.ml.deployment import FHEModelDev
         print("[✓] Concrete ML đã sẵn sàng.", flush=True)
+
+        try:
+            import concrete.compiler
+            if hasattr(concrete.compiler, "check_gpu_available") and concrete.compiler.check_gpu_available():
+                logger.info("🚀 ĐÃ PHÁT HIỆN NVIDIA GPU (CUDA)! Sẽ biên dịch mạch FHE tối ưu cho GPU.")
+            else:
+                logger.info("ℹ️ Đang chạy trên CPU (chưa phát hiện backend GPU).")
+        except Exception:
+            pass
     except ImportError:
         logger.error("Vui lòng cài đặt concrete-ml trên Linux/WSL:")
         logger.error("  pip install concrete-ml")

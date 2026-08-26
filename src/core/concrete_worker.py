@@ -30,6 +30,12 @@ def main(model_name):
         sys.exit(1)
         
     logger.info("[SERVER] Đang khởi tạo FHE Server (TFHE) từ tệp Deployment (1 lần)...")
+    try:
+        import concrete.compiler
+        if hasattr(concrete.compiler, "check_gpu_available") and concrete.compiler.check_gpu_available():
+            logger.info("[SERVER] 🚀 Đang kích hoạt tăng tốc NVIDIA GPU (CUDA)...")
+    except Exception:
+        pass
     server = FHEModelServer(deploy_dir)
     
     batch_path = os.path.join(tmp_dir, "concrete_enc_batch.bin")
