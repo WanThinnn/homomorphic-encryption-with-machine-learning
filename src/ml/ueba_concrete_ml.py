@@ -52,33 +52,45 @@ def _train_and_compile_lr(X_train, y_train, n_bits=8):
     return model, t_compile
 
 
-def _train_and_compile_mlp(X_train, y_train, n_bits=6):
-    """Train a Concrete ML NeuralNetClassifier and compile to FHE circuit."""
-    from concrete.ml.sklearn import NeuralNetClassifier
+def _train_and_compile_mlp(X_train, y_train, model_dir: str, n_bits=3):
+    """Train a Concrete ML NeuralNetClassifier, compile to FHE circuit, and save it."""
     import torch
+    from concrete.ml.sklearn import NeuralNetClassifier
+    from concrete.ml.common.serialization.dumpers import dump
+    from concrete.ml.common.serialization.loaders import load
+    
+    model_path = os.path.join(model_dir, "concrete_mlp.json")
+    if os.path.exists(model_path):
+        logger.info(f"Found compiled FHE circuit at {model_path}. Loading... (Skipping Train & Compile)")
+        model = load(open(model_path, "r"))
+        return model, 0.0
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}) on {device}...")
+    # Ép dùng 10 luồng CPU
+    torch.set_num_threads(10)
+
+    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}) on CPU with 10 threads...")
     model = NeuralNetClassifier(
         module__n_layers=2,
         module__n_w_bits=n_bits,
         module__n_a_bits=n_bits,
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=2,
-        max_epochs=50,
-        device=device,
+        max_epochs=15,
         verbose=0,
     )
     model.fit(X_train, y_train)
 
     logger.info("Compiling to FHE circuit (calibrating with 1000 samples)...")
     t0 = time.perf_counter()
-    # CRITICAL FIX: Only pass a subset to compile() for bounds calibration, 
-    # passing 460,000 samples will freeze the CPU for hours!
     calib_size = min(1000, X_train.shape[0])
     model.compile(X_train[:calib_size])
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")
+
+    os.makedirs(model_dir, exist_ok=True)
+    with open(model_path, "w") as f:
+        dump(model, f)
+    logger.info(f"Saved compiled FHE circuit to {model_path}")
 
     return model, t_compile
 
