@@ -98,7 +98,10 @@ def cmd_prepare_data(args):
     from data.cert_preprocessor import preprocess
 
     raw_dir = os.path.join(ROOT_DIR, "data", "cert", "raw")
-    if os.path.exists(os.path.join(raw_dir, "r4.2")):
+    if args.dataset_version and os.path.exists(os.path.join(raw_dir, args.dataset_version)):
+        raw_dir = os.path.join(raw_dir, args.dataset_version)
+    elif os.path.exists(os.path.join(raw_dir, "r4.2")):
+        # Default fallback to r4.2 if not specified but exists
         raw_dir = os.path.join(raw_dir, "r4.2")
         
     out_dir = os.path.join(ROOT_DIR, "data", "cert", "processed")
@@ -121,6 +124,7 @@ def main():
 
     # --- prepare-data ---
     sp_data = subparsers.add_parser("prepare-data", help="Download & process CERT dataset")
+    sp_data.add_argument("--dataset-version", type=str, default=None, help="E.g., 'r5.2' to process a specific version folder")
 
     # --- train ---
     sp_train = subparsers.add_parser("train", help="Train a plaintext ML model")
