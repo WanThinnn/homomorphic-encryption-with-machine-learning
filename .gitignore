@@ -116,7 +116,7 @@ src/ml/models/**/*.bin
 # ==========================================
 data/
 !data/cert/processed/feature_names.json
-
+!src/data
 # ==========================================
 # 9. Keep important config files
 # ==========================================
