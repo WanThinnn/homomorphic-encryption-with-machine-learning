@@ -98,6 +98,9 @@ def cmd_prepare_data(args):
     from data.cert_preprocessor import preprocess
 
     raw_dir = os.path.join(ROOT_DIR, "data", "cert", "raw")
+    if os.path.exists(os.path.join(raw_dir, "r4.2")):
+        raw_dir = os.path.join(raw_dir, "r4.2")
+        
     out_dir = os.path.join(ROOT_DIR, "data", "cert", "processed")
 
     logger.info("Step 1: Extracting behavioral features from raw CERT logs...")
