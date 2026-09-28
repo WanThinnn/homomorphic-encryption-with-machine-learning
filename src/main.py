@@ -93,21 +93,30 @@ def cmd_benchmark(args):
 
 
 def cmd_prepare_data(args):
-    """Download and process CERT v4.2 dataset."""
-    from data.cert_feature_extractor import extract_features
+    """Process raw logs into behavioral_features.csv using the appropriate Adapter."""
     from data.cert_preprocessor import preprocess
 
     raw_dir = os.path.join(ROOT_DIR, "data", "cert", "raw")
-    if args.dataset_version and os.path.exists(os.path.join(raw_dir, args.dataset_version)):
-        raw_dir = os.path.join(raw_dir, args.dataset_version)
-    elif os.path.exists(os.path.join(raw_dir, "r4.2")):
-        # Default fallback to r4.2 if not specified but exists
-        raw_dir = os.path.join(raw_dir, "r4.2")
-        
     out_dir = os.path.join(ROOT_DIR, "data", "cert", "processed")
 
-    logger.info("Step 1: Extracting behavioral features from raw CERT logs...")
-    extract_features(raw_dir=raw_dir, output_dir=out_dir)
+    logger.info(f"Step 1: Extracting behavioral features using {args.source.upper()} adapter...")
+
+    if args.source == "cert":
+        from data.adapters.cert_adapter import CertAdapter
+        # For CERT, check if r4.2 or r5.2 exists
+        if os.path.exists(os.path.join(raw_dir, "r4.2")):
+            raw_dir = os.path.join(raw_dir, "r4.2")
+        adapter = CertAdapter()
+    elif args.source == "elastic":
+        from data.adapters.elastic_ecs_adapter import ElasticEcsAdapter
+        adapter = ElasticEcsAdapter()
+    elif args.source == "splunk":
+        # Placeholder for Splunk Adapter
+        raise NotImplementedError("Splunk adapter is not implemented yet.")
+    else:
+        raise ValueError(f"Unknown source adapter: {args.source}")
+
+    adapter.extract_features(raw_dir=raw_dir, output_dir=out_dir)
 
     logger.info("Step 2: Preprocessing (normalize, split, handle imbalance)...")
     preprocess(data_dir=out_dir)
@@ -123,8 +132,8 @@ def main():
     subparsers = parser.add_subparsers(dest="mode", help="Operating mode")
 
     # --- prepare-data ---
-    sp_data = subparsers.add_parser("prepare-data", help="Download & process CERT dataset")
-    sp_data.add_argument("--dataset-version", type=str, default=None, help="E.g., 'r5.2' to process a specific version folder")
+    sp_data = subparsers.add_parser("prepare-data", help="Download & process dataset")
+    sp_data.add_argument("--source", choices=["cert", "elastic", "splunk"], default="cert", help="Data source adapter to use")
 
     # --- train ---
     sp_train = subparsers.add_parser("train", help="Train a plaintext ML model")
