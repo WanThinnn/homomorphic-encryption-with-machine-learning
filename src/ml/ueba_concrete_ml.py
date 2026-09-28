@@ -55,8 +55,10 @@ def _train_and_compile_lr(X_train, y_train, n_bits=8):
 def _train_and_compile_mlp(X_train, y_train, n_bits=6):
     """Train a Concrete ML NeuralNetClassifier and compile to FHE circuit."""
     from concrete.ml.sklearn import NeuralNetClassifier
+    import torch
 
-    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits})...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}) on {device}...")
     model = NeuralNetClassifier(
         module__n_layers=2,
         module__n_w_bits=n_bits,
@@ -64,13 +66,17 @@ def _train_and_compile_mlp(X_train, y_train, n_bits=6):
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=2,
         max_epochs=50,
+        device=device,
         verbose=0,
     )
     model.fit(X_train, y_train)
 
-    logger.info("Compiling to FHE circuit...")
+    logger.info("Compiling to FHE circuit (calibrating with 1000 samples)...")
     t0 = time.perf_counter()
-    model.compile(X_train)
+    # CRITICAL FIX: Only pass a subset to compile() for bounds calibration, 
+    # passing 460,000 samples will freeze the CPU for hours!
+    calib_size = min(1000, X_train.shape[0])
+    model.compile(X_train[:calib_size])
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")
 
