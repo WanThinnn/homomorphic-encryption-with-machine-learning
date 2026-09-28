@@ -1,10 +1,9 @@
 """
-Crypto module — Mã hóa đồng cấu FHE (CKKS) và dịch vụ Cross-Tenant (v2).
+Crypto module — Fully Homomorphic Encryption backends.
 
 Components:
-- FHEPipeline: Quản lý CryptoContext, tạo khóa, mã hóa/giải mã
-- simd_ops: Phép toán SIMD matrix-vector trên CKKS (thay thế element-wise)
-- CrossTenantService: Encrypted cross-tenant threat intelligence
+  - FHEPipeline: CKKS scheme via OpenFHE (encrypt, decrypt, eval ops)
+  - ueba_ckks_inference: Privacy-preserving UEBA inference over CKKS
 """
 
 from .homomorphic_encryption import FHEPipeline

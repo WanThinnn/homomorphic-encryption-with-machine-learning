@@ -105,10 +105,20 @@ src/models/securebert-2
 !src/scheme/mappings/*
 !.env.example
 logs/*
-*_plan.md
 .agents/*
 src/ml/models/**/*.json
 src/ml/models/**/*.zip
 src/ml/models/**/*.bin
 *env/
+
+# ==========================================
+# 8. Data & UEBA Processed Files
+# ==========================================
 data/
+!data/cert/processed/feature_names.json
+
+# ==========================================
+# 9. Keep important config files
+# ==========================================
+!ueba_plan.md
+!src/data/feature_names.json
