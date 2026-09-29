@@ -55,16 +55,23 @@ class ElasticEcsAdapter(BaseAdapter):
                                 record = {
                                     "user": src_ip,
                                     "day": day,
-                                    "login_count": 0, "logoff_count": 0, 
-                                    "file_copy_count": 0, "file_write_count": 0, 
-                                    "file_delete_count": 0, "file_exe_count": exe_count,
-                                    "email_sent_count": 0, "email_external_count": 0, 
-                                    "email_attachment_count": 0, "email_size_mean": 0,
+                                    "login_count": 0, 
+                                    "logoff_count": 0, 
+                                    "after_hours_login": 0,
+                                    "unique_machines": 0,
+                                    "file_copy_count": 0, 
+                                    "file_write_count": 0, 
+                                    "file_delete_count": 0, 
+                                    "file_exe_count": exe_count,
+                                    "email_sent": 0, 
+                                    "email_external": 0, 
+                                    "email_attachments": 0, 
+                                    "email_bcc_count": 0,
+                                    "usb_connect": 0, 
+                                    "usb_disconnect": 0,
                                     "http_requests": http_req, 
                                     "unique_urls": url_count, 
                                     "unique_domains": domain_count,
-                                    "device_connect_count": 0, 
-                                    "device_disconnect_count": 0,
                                     "label": 0  # Default to normal, need external labeling for real data
                                 }
                                 all_records.append(record)
@@ -75,28 +82,43 @@ class ElasticEcsAdapter(BaseAdapter):
         if all_records:
             df = pd.DataFrame(all_records)
             df = df.groupby(["user", "day"]).agg({
-                "login_count": "sum", "logoff_count": "sum", 
-                "file_copy_count": "sum", "file_write_count": "sum", 
-                "file_delete_count": "sum", "file_exe_count": "sum",
-                "email_sent_count": "sum", "email_external_count": "sum", 
-                "email_attachment_count": "sum", "email_size_mean": "mean",
+                "login_count": "sum", 
+                "logoff_count": "sum", 
+                "after_hours_login": "sum",
+                "unique_machines": "max",
+                "file_copy_count": "sum", 
+                "file_write_count": "sum", 
+                "file_delete_count": "sum", 
+                "file_exe_count": "sum",
+                "email_sent": "sum", 
+                "email_external": "sum", 
+                "email_attachments": "sum", 
+                "email_bcc_count": "sum",
+                "usb_connect": "sum", 
+                "usb_disconnect": "sum",
                 "http_requests": "sum", 
                 "unique_urls": "sum", 
                 "unique_domains": "sum",
-                "device_connect_count": "sum", 
-                "device_disconnect_count": "sum",
                 "label": "max"
             }).reset_index()
             # Fill NaN
             df.fillna(0, inplace=True)
+            
+            # Ensure exact column order matching CERT
+            feature_cols = [
+                "login_count", "logoff_count", "after_hours_login", "unique_machines",
+                "file_copy_count", "file_write_count", "file_delete_count", "file_exe_count",
+                "email_sent", "email_external", "email_attachments", "email_bcc_count",
+                "usb_connect", "usb_disconnect", "http_requests", "unique_urls", "unique_domains"
+            ]
+            df = df[["user", "day"] + feature_cols + ["label"]]
         else:
             # Fallback empty dataframe if no logs
             cols = [
-                "user", "day", "login_count", "logoff_count", "file_copy_count", 
-                "file_write_count", "file_delete_count", "file_exe_count", 
-                "email_sent_count", "email_external_count", "email_attachment_count", 
-                "email_size_mean", "http_requests", "unique_urls", "unique_domains", 
-                "device_connect_count", "device_disconnect_count", "label"
+                "user", "day", "login_count", "logoff_count", "after_hours_login", "unique_machines",
+                "file_copy_count", "file_write_count", "file_delete_count", "file_exe_count",
+                "email_sent", "email_external", "email_attachments", "email_bcc_count",
+                "usb_connect", "usb_disconnect", "http_requests", "unique_urls", "unique_domains", "label"
             ]
             df = pd.DataFrame(columns=cols)
         

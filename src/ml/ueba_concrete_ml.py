@@ -347,6 +347,8 @@ def run_fhe_inference(
     model_dir: str,
     n_samples: int = 10,
     version: Optional[int] = None,
+    custom_X: Optional[np.ndarray] = None,
+    custom_y: Optional[np.ndarray] = None,
 ):
     """
     Load a saved compiled model and run REAL FHE encrypted inference.
@@ -368,8 +370,16 @@ def run_fhe_inference(
 
     model = _load_cached_model(model_path)
 
-    X_test = np.load(os.path.join(data_dir, "X_test.npy"))
-    y_test = np.load(os.path.join(data_dir, "y_test.npy"))
+    # Always load original X_test for compilation calibration
+    X_test_orig = np.load(os.path.join(data_dir, "X_test.npy"))
+    
+    if custom_X is not None:
+        logger.info(f"Using custom dataset with {len(custom_X)} samples.")
+        X_test = custom_X
+        y_test = custom_y if custom_y is not None else np.zeros(len(custom_X))
+    else:
+        X_test = X_test_orig
+        y_test = np.load(os.path.join(data_dir, "y_test.npy"))
 
     # Concrete ML JSON dump does not serialize the FHE circuit to save space/portability.
     # We must re-compile the model before FHE execution (using a calibration subset).
@@ -379,11 +389,11 @@ def run_fhe_inference(
         try:
             from concrete.fhe import Configuration
             config = Configuration(use_gpu=True)
-            model.compile(X_test[:500], configuration=config)
+            model.compile(X_test_orig[:500], configuration=config)
             logger.info("Successfully compiled with GPU configuration!")
         except Exception as e:
             logger.warning(f"GPU compilation failed, falling back to CPU: {e}")
-            model.compile(X_test[:500])
+            model.compile(X_test_orig[:500])
         logger.info(f"Compilation complete in {time.perf_counter() - t0:.1f}s")
 
     # Run FHE inference

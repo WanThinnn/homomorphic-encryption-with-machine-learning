@@ -94,13 +94,65 @@ def cmd_evaluate(args):
 def cmd_fhe_inference(args):
     """Run REAL FHE encrypted inference using a saved compiled model."""
     from ml.ueba_concrete_ml import run_fhe_inference
+    import numpy as np
+    import pandas as pd
+    import pickle
+    
     dataset = _detect_dataset(args.source, args.dataset)
+    data_dir = _data_dir(args.source, dataset)
+    
+    custom_X = None
+    custom_y = None
+    
+    if args.logs:
+        logger.info(f"Processing custom logs from {args.logs}...")
+        if args.adapter == "ecs":
+            from data.adapters.elastic_ecs_adapter import ElasticEcsAdapter
+            adapter = ElasticEcsAdapter()
+        else:
+            logger.error("You must specify --adapter ecs when providing --logs")
+            return
+            
+        # Parse logs
+        out_dir = os.path.join(ROOT_DIR, "tmp", "custom_inference")
+        # If it's a file, we might need to put it in a temporary directory for the adapter which expects raw_dir
+        raw_dir = args.logs
+        if os.path.isfile(args.logs):
+            import shutil
+            raw_dir = os.path.join(ROOT_DIR, "tmp", "custom_raw")
+            os.makedirs(raw_dir, exist_ok=True)
+            shutil.copy(args.logs, os.path.join(raw_dir, os.path.basename(args.logs)))
+            
+        features_csv = adapter.extract_features(raw_dir, out_dir)
+        df = pd.read_csv(features_csv)
+        
+        if df.empty:
+            logger.error("No valid features extracted from the logs.")
+            return
+            
+        # Drop non-feature columns
+        feature_cols = [c for c in df.columns if c not in ["user", "day", "label"]]
+        X_raw = df[feature_cols].values
+        custom_y = df["label"].values if "label" in df.columns else np.zeros(len(X_raw))
+        
+        # Scale features using the saved scaler from the training pipeline
+        scaler_path = os.path.join(data_dir, "scaler.pkl")
+        if os.path.exists(scaler_path):
+            with open(scaler_path, "rb") as f:
+                scaler = pickle.load(f)
+            custom_X = scaler.transform(X_raw)
+        else:
+            logger.warning("No scaler.pkl found. Using raw unscaled features!")
+            custom_X = X_raw
+
     run_fhe_inference(
         model_type=args.model,
-        data_dir=_data_dir(args.source, dataset),
+        data_dir=data_dir,
         model_dir=os.path.join(SRC_DIR, "ml", "models"),
         n_samples=args.n_samples,
         version=args.version,
+        custom_X=custom_X,
+        custom_y=custom_y
     )
 
 
@@ -187,6 +239,8 @@ def main():
     sp_fhe.add_argument("--version", type=int, default=None, help="Model version (default: latest)")
     sp_fhe.add_argument("--source", choices=SOURCE_CHOICES, default="cert", help="Data source")
     sp_fhe.add_argument("--dataset", type=str, default=None, help=DATASET_HELP)
+    sp_fhe.add_argument("--logs", type=str, default=None, help="Path to a custom raw log file or directory to process and evaluate")
+    sp_fhe.add_argument("--adapter", type=str, choices=["ecs"], default=None, help="Adapter to parse the custom logs (e.g. ecs)")
 
     # --- benchmark ---
     sp_bench = subparsers.add_parser("benchmark", help="Run full benchmark suite")
