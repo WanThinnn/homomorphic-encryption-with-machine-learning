@@ -234,12 +234,12 @@ def _train_mlp(X_train, y_train, n_bits=6, max_epochs=50):
 # Public API
 # ============================================================
 
-def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15):
+def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15, source: str = "cert", dataset: str = "default"):
     """
     Train a Concrete ML model, compile to FHE circuit, evaluate, and save.
     
     This is the MAIN training entry point. Each run creates a new version:
-      v1, v2, v3... with metadata (metrics, config, timestamp).
+      v1, v2, v3... with metadata (metrics, config, timestamp, data source).
     """
     _check_concrete_ml()
     from sklearn.metrics import classification_report, roc_auc_score
@@ -250,15 +250,15 @@ def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15
     X_val = np.load(os.path.join(data_dir, "X_val.npy"))
     y_val = np.load(os.path.join(data_dir, "y_val.npy"))
 
-    logger.info(f"Loaded data: train={X_train.shape}, val={X_val.shape}")
+    logger.info(f"Loaded data: train={X_train.shape}, val={X_val.shape} (source={source}, dataset={dataset})")
 
     # Train & compile
     if model_type == "lr":
         model, t_compile = _train_lr(X_train, y_train)
-        config = {"n_bits": 8, "model": "LogisticRegression"}
+        config = {"n_bits": 8, "model": "LogisticRegression", "source": source, "dataset": dataset}
     elif model_type == "mlp":
         model, t_compile = _train_mlp(X_train, y_train, max_epochs=epochs)
-        config = {"n_bits": 6, "n_layers": 2, "epochs": epochs, "optimizer": "Adam", "lr": 0.001, "batch_size": 2048}
+        config = {"n_bits": 6, "n_layers": 2, "epochs": epochs, "optimizer": "Adam", "lr": 0.001, "batch_size": 2048, "source": source, "dataset": dataset}
     else:
         raise ValueError(f"Supported models: lr, mlp. Got: {model_type}")
 
