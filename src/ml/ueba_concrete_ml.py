@@ -356,6 +356,14 @@ def run_fhe_inference(
     X_test = np.load(os.path.join(data_dir, "X_test.npy"))
     y_test = np.load(os.path.join(data_dir, "y_test.npy"))
 
+    # Concrete ML JSON dump does not serialize the FHE circuit to save space/portability.
+    # We must re-compile the model before FHE execution (using a calibration subset).
+    if not hasattr(model, 'fhe_circuit') or model.fhe_circuit is None:
+        logger.info("Re-compiling FHE circuit (calibrating with 500 test samples)...")
+        t0 = time.perf_counter()
+        model.compile(X_test[:500])
+        logger.info(f"Compilation complete in {time.perf_counter() - t0:.1f}s")
+
     # Run FHE inference
     results = {"predictions": [], "fhe_times": []}
     n = min(n_samples, len(X_test))
