@@ -337,7 +337,9 @@ def _extract_features_impl(raw_dir: str, output_dir: str) -> str:
             on=["user", "day"],
             how="left"
         )
-    merged["label"] = merged.get("label", 0).fillna(0).astype(int)
+    if "label" not in merged.columns:
+        merged["label"] = 0
+    merged["label"] = merged["label"].fillna(0).astype(int)
 
     # Select final columns
     output_cols = ["user", "day"] + FEATURE_COLUMNS + ["label"]
