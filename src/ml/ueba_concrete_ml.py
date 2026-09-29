@@ -223,7 +223,14 @@ def _train_mlp(X_train, y_train, n_bits=6, max_epochs=50):
     logger.info("Compiling to FHE circuit (calibrating with 5000 samples)...")
     t0 = time.perf_counter()
     calib_size = min(5000, X_train.shape[0])
-    model.compile(X_train[:calib_size])
+    try:
+        from concrete.fhe import Configuration
+        config = Configuration(use_gpu=True)
+        model.compile(X_train[:calib_size], configuration=config)
+        logger.info("Successfully compiled with GPU configuration!")
+    except Exception as e:
+        logger.warning(f"GPU compilation failed, falling back to CPU: {e}")
+        model.compile(X_train[:calib_size])
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")
 
@@ -361,7 +368,14 @@ def run_fhe_inference(
     if not hasattr(model, 'fhe_circuit') or model.fhe_circuit is None:
         logger.info("Re-compiling FHE circuit (calibrating with 500 test samples)...")
         t0 = time.perf_counter()
-        model.compile(X_test[:500])
+        try:
+            from concrete.fhe import Configuration
+            config = Configuration(use_gpu=True)
+            model.compile(X_test[:500], configuration=config)
+            logger.info("Successfully compiled with GPU configuration!")
+        except Exception as e:
+            logger.warning(f"GPU compilation failed, falling back to CPU: {e}")
+            model.compile(X_test[:500])
         logger.info(f"Compilation complete in {time.perf_counter() - t0:.1f}s")
 
     # Run FHE inference
