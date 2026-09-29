@@ -55,8 +55,14 @@ sudo apt-get install python3.10 python3.10-distutils -y
 curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
 python3.10 get-pip.py --ignore-installed
 
-# Cài đặt thư viện ML, PyTorch và Concrete FHE GPU Backend (Cài chung để tự động giải quyết dependencies)
-python3.10 -m pip install -q concrete-ml imbalanced-learn torch torchvision scikit-learn pandas numpy concrete-python --extra-index-url https://pypi.zama.ai/gpu --trusted-host pypi.zama.ai --ignore-installed
+# 1. Cài đặt các thư viện ML cơ bản và concrete-ml (Bản CPU mặc định)
+python3.10 -m pip install -q numpy pandas scikit-learn torch imbalanced-learn concrete-ml==1.9.0
+
+# 2. Xóa bỏ lõi compiler CPU mặc định
+python3.10 -m pip uninstall -y concrete-python concrete-compiler
+
+# 3. Cài đặt lõi compiler GPU (CUDA 11.8/12.x) tương thích chính xác với concrete-ml 1.9.0
+python3.10 -m pip install -q concrete-python==2.10.0 --extra-index-url https://pypi.zama.ai/gpu
 
 # Kiểm tra version
 python3.10 -c "import concrete.ml; print('Concrete ML version:', concrete.ml.__version__)"
