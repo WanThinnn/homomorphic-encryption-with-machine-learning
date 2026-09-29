@@ -279,11 +279,11 @@ def _load_labels(raw_dir: str) -> pd.DataFrame:
             logger.info(f"Loading labels from {path}...")
             df = pd.read_csv(path)
             df.columns = [c.strip().lower() for c in df.columns]
-            # Normalize to (user, day, label)
-            if "date" in df.columns:
+            
+            # If the dataset provides 'date' instead of 'start'/'end'
+            if "date" in df.columns and "start" not in df.columns:
                 df["day"] = pd.to_datetime(df["date"], format="mixed", errors="coerce").dt.date
-            if "start" in df.columns:
-                df["day"] = pd.to_datetime(df["start"], format="mixed", errors="coerce").dt.date
+                
             return df
 
     logger.warning("No labels file found. All samples will be labeled as normal (0).")
@@ -337,16 +337,36 @@ def _extract_features_impl(raw_dir: str, output_dir: str) -> str:
 
     # Load labels
     labels_df = _load_labels(raw_dir)
-    if not labels_df.empty and "user" in labels_df.columns and "day" in labels_df.columns:
-        # Mark malicious (user, day) pairs
-        labels_df["label"] = 1
-        merged = merged.merge(
-            labels_df[["user", "day", "label"]],
-            on=["user", "day"],
-            how="left"
-        )
+    
     if "label" not in merged.columns:
         merged["label"] = 0
+
+    if not labels_df.empty and "user" in labels_df.columns:
+        if "start" in labels_df.columns and "end" in labels_df.columns:
+            # Labels have start and end dates (like CERT v4.2 insiders.csv)
+            labels_df["start"] = pd.to_datetime(labels_df["start"], format="mixed", errors="coerce").dt.date
+            labels_df["end"] = pd.to_datetime(labels_df["end"], format="mixed", errors="coerce").dt.date
+            
+            for _, row in labels_df.iterrows():
+                u = row["user"]
+                s = row["start"]
+                e = row["end"]
+                if pd.notna(s) and pd.notna(e):
+                    # Mark all days between start and end as malicious
+                    mask = (merged["user"] == u) & (merged["day"] >= s) & (merged["day"] <= e)
+                    merged.loc[mask, "label"] = 1
+        elif "day" in labels_df.columns:
+            # Fallback for exact day labels
+            labels_df["label"] = 1
+            merged = merged.merge(
+                labels_df[["user", "day", "label"]],
+                on=["user", "day"],
+                how="left",
+                suffixes=("", "_y")
+            )
+            merged["label"] = merged["label"].mask(merged["label_y"] == 1, 1)
+            merged = merged.drop(columns=["label_y"], errors="ignore")
+
     merged["label"] = merged["label"].fillna(0).astype(int)
 
     # Select final columns
