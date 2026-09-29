@@ -117,6 +117,7 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=4,
         max_epochs=max_epochs,
+        batch_size=2048,
         verbose=1,
         device=device,
     )
