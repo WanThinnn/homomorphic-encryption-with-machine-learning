@@ -105,7 +105,7 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
     from concrete.ml.sklearn import NeuralNetClassifier
     import torch
 
-    n_threads = max(os.cpu_count() - 2, 1)
+    n_threads = os.cpu_count() or 2
     torch.set_num_threads(n_threads)
 
     logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) with {n_threads} threads...")
