@@ -108,7 +108,8 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
     n_threads = os.cpu_count() or 2
     torch.set_num_threads(n_threads)
 
-    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) with {n_threads} threads...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) on {device.upper()} with {n_threads} CPU threads for compilation...")
     model = NeuralNetClassifier(
         module__n_layers=3,
         module__n_w_bits=n_bits,
@@ -116,7 +117,8 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=4,
         max_epochs=max_epochs,
-        verbose=0,
+        verbose=1,
+        device=device,
     )
     model.fit(X_train, y_train)
 
