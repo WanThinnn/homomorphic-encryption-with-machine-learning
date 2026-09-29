@@ -275,24 +275,30 @@ def _load_labels(raw_dir: str) -> pd.DataFrame:
     return pd.DataFrame(columns=["user", "day"])
 
 
-    def extract_features(self, raw_dir: str, output_dir: str) -> str:
-        """
-        Main entry point: parse all CERT v4.2 CSVs → behavioral_features.csv
+def extract_features(raw_dir: str, output_dir: str) -> str:
+    """
+    Standalone entry point: parse all CERT v4.2 CSVs → behavioral_features.csv
+    (Also used by CertAdapter.extract_features)
 
-        Returns path to the output CSV file.
-        """
-        output_path = os.path.join(output_dir, "behavioral_features.csv")
-        if os.path.exists(output_path):
-            logger.info(f"Features already extracted at {output_path}. Skipping extraction step!")
-            return output_path
+    Returns path to the output CSV file.
+    """
+    output_path = os.path.join(output_dir, "behavioral_features.csv")
+    if os.path.exists(output_path):
+        logger.info(f"Features already extracted at {output_path}. Skipping extraction step!")
+        return output_path
 
     os.makedirs(output_dir, exist_ok=True)
 
     # Parse each log stream
+    logger.info("Parsing logon.csv...")
     logon_df = _parse_logon(raw_dir)
+    logger.info("Parsing file.csv...")
     file_df = _parse_file(raw_dir)
+    logger.info("Parsing email.csv...")
     email_df = _parse_email(raw_dir)
+    logger.info("Parsing device.csv...")
     device_df = _parse_device(raw_dir)
+    logger.info("Parsing http.csv...")
     http_df = _parse_http(raw_dir)
 
     # Merge all features on (user, day)
@@ -344,8 +350,13 @@ def _load_labels(raw_dir: str) -> pd.DataFrame:
     return output_path
 
 
+# CertAdapter delegates to the standalone function
+CertAdapter.extract_features = lambda self, raw_dir, output_dir: extract_features(raw_dir, output_dir)
+
+
 if __name__ == "__main__":
     import sys
     raw = sys.argv[1] if len(sys.argv) > 1 else os.path.join("..", "..", "data", "cert", "raw")
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join("..", "..", "data", "cert", "processed")
     extract_features(raw, out)
+

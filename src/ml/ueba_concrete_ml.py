@@ -62,7 +62,8 @@ def _train_and_compile_mlp(X_train, y_train, model_dir: str, n_bits=3):
     model_path = os.path.join(model_dir, "concrete_mlp.json")
     if os.path.exists(model_path):
         logger.info(f"Found compiled FHE circuit at {model_path}. Loading... (Skipping Train & Compile)")
-        model = load(open(model_path, "r"))
+        with open(model_path, "r") as f:
+            model = load(f)
         return model, 0.0
 
     # Ép dùng 10 luồng CPU
