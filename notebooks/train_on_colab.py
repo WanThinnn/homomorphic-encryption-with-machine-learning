@@ -47,28 +47,28 @@ print(f"Working directory: {os.getcwd()}")
 
 # %%
 %%bash
-# Cài đặt Python 3.10 và venv để tạo môi trường cách ly hoàn toàn
+# Cài đặt Python 3.10
 sudo apt-get update -y
-sudo apt-get install python3.10 python3.10-venv python3.10-distutils -y
+sudo apt-get install python3.10 python3.10-distutils -y
 
-# Tạo môi trường ảo có tên colab_env để tránh xung đột thư viện mặc định của Colab
-python3.10 -m venv colab_env
-source colab_env/bin/activate
+# Cài pip cho Python 3.10
+curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python3.10 get-pip.py --ignore-installed
 
-# Cập nhật pip trong venv
-pip install --upgrade pip
+# Quan trọng: Xóa PYTHONPATH của Colab để Python 3.10 không tải nhầm numpy cũ của hệ thống
+export PYTHONPATH=""
 
 # 1. Cài đặt các thư viện ML cơ bản và concrete-ml (Bản CPU mặc định)
-pip install -q numpy pandas scikit-learn torch imbalanced-learn concrete-ml==1.9.0
+python3.10 -m pip install -q numpy pandas scikit-learn torch imbalanced-learn concrete-ml==1.9.0
 
 # 2. Xóa bỏ lõi compiler CPU mặc định
-pip uninstall -y concrete-python concrete-compiler
+python3.10 -m pip uninstall -y concrete-python concrete-compiler
 
 # 3. Cài đặt lõi compiler GPU (CUDA 11.8/12.x) tương thích chính xác với concrete-ml 1.9.0
-pip install -q concrete-python==2.10.0 --extra-index-url https://pypi.zama.ai/gpu
+python3.10 -m pip install -q concrete-python==2.10.0 --extra-index-url https://pypi.zama.ai/gpu
 
 # Kiểm tra version
-python -c "import concrete.ml; print('Concrete ML version:', concrete.ml.__version__)"
+python3.10 -c "import concrete.ml; print('Concrete ML version:', concrete.ml.__version__)"
 
 # %% [markdown]
 # ## 📊 Cell 3: Prepare Dataset
@@ -108,38 +108,38 @@ if not os.path.exists(R42_DIR):
 else:
     print(f"Already extracted: {R42_DIR}")
 
-# Chạy tiền xử lý (Extract Features + SMOTE) bằng Python 3.10
-get_ipython().system('source colab_env/bin/activate && python src/main.py prepare-data')
+# Chạy tiền xử lý (Extract Features + SMOTE)
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py prepare-data')
 
 # %% [markdown]
 # ## 🧠 Cell 4: Train Logistic Regression (Concrete ML)
 
 # %%
-get_ipython().system('source colab_env/bin/activate && python src/main.py train --model lr')
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py train --model lr')
 
 # %% [markdown]
 # ## 🧠 Cell 5: Train MLP (Concrete ML)
 # 4-bit quantization, 3 hidden layers, 50 epochs. Quá trình này sẽ mất vài phút.
 
 # %%
-get_ipython().system('source colab_env/bin/activate && python src/main.py train --model mlp --epochs 50')
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py train --model mlp --epochs 50')
 
 # %% [markdown]
 # ## 📊 Cell 6: Evaluate on Test Set
 
 # %%
 print("=== LOGISTIC REGRESSION ===")
-get_ipython().system('source colab_env/bin/activate && python src/main.py evaluate --model lr')
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py evaluate --model lr')
 
 print("\n=== MLP ===")
-get_ipython().system('source colab_env/bin/activate && python src/main.py evaluate --model mlp')
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py evaluate --model mlp')
 
 # %% [markdown]
 # ## 🔐 Cell 7: FHE Encrypted Inference
 # Test chạy inference mã hóa thực tế trên model đã compile.
 
 # %%
-get_ipython().system('source colab_env/bin/activate && python src/main.py fhe-inference --model mlp --n-samples 10')
+get_ipython().system('PYTHONPATH="" python3.10 src/main.py fhe-inference --model mlp --n-samples 10')
 
 # %% [markdown]
 # ## 💾 Cell 8: Save to Google Drive
