@@ -120,7 +120,7 @@ def run_concrete_inference(
     if model_type == "lr":
         model, t_compile = _train_and_compile_lr(X_train, y_train)
     elif model_type == "mlp":
-        model, t_compile = _train_and_compile_mlp(X_train, y_train)
+        model, t_compile = _train_and_compile_mlp(X_train, y_train, model_dir)
     else:
         logger.error(f"Unknown model: {model_type}")
         return
