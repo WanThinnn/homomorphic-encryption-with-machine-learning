@@ -23,6 +23,12 @@ import logging
 import numpy as np
 from typing import Dict, Any, Optional
 
+# Zama Concrete ML defaults to using ALL hardware threads for both OpenMP and 
+# GPU scheduler spin-locks. This causes 100% CPU lockup even when using GPU.
+# We limit the background threads here before importing any concrete/torch libraries.
+os.environ["OMP_NUM_THREADS"] = str(min(4, os.cpu_count() or 2))
+os.environ["SDFG_NUM_THREADS"] = str(min(4, os.cpu_count() or 2))
+
 logger = logging.getLogger(__name__)
 
 N_FEATURES = 17
@@ -201,7 +207,9 @@ def _train_mlp(X_train, y_train, n_bits=6, max_epochs=50):
     from concrete.ml.sklearn import NeuralNetClassifier
     import torch
 
-    n_threads = os.cpu_count() or 2
+    n_threads = min(4, os.cpu_count() or 2)  # Limit to 4 threads to prevent 100% CPU lockup
+    os.environ["OMP_NUM_THREADS"] = str(n_threads)
+    os.environ["SDFG_NUM_THREADS"] = str(n_threads)
     torch.set_num_threads(n_threads)
 
     logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) on CPU with {n_threads} threads...")
