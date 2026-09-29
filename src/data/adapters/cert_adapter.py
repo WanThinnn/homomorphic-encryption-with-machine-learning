@@ -21,6 +21,13 @@ class CertAdapter(BaseAdapter):
     Adapter for CERT v4.2 Dataset.
     Transforms raw CERT logs into a standardized 17-feature vector.
     """
+    
+    def extract_features(self, raw_dir: str, output_dir: str) -> str:
+        """
+        Main entry point: parse all CERT v4.2 CSVs → behavioral_features.csv
+        Delegates to the standalone function.
+        """
+        return _extract_features_impl(raw_dir, output_dir)
 
 # The 17 behavioral features we extract per (user, day)
 FEATURE_COLUMNS = [
@@ -275,7 +282,7 @@ def _load_labels(raw_dir: str) -> pd.DataFrame:
     return pd.DataFrame(columns=["user", "day"])
 
 
-def extract_features(raw_dir: str, output_dir: str) -> str:
+def _extract_features_impl(raw_dir: str, output_dir: str) -> str:
     """
     Standalone entry point: parse all CERT v4.2 CSVs → behavioral_features.csv
     (Also used by CertAdapter.extract_features)
@@ -350,13 +357,9 @@ def extract_features(raw_dir: str, output_dir: str) -> str:
     return output_path
 
 
-# CertAdapter delegates to the standalone function
-CertAdapter.extract_features = lambda self, raw_dir, output_dir: extract_features(raw_dir, output_dir)
-
-
 if __name__ == "__main__":
     import sys
     raw = sys.argv[1] if len(sys.argv) > 1 else os.path.join("..", "..", "data", "cert", "raw")
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join("..", "..", "data", "cert", "processed")
-    extract_features(raw, out)
+    _extract_features_impl(raw, out)
 
