@@ -167,3 +167,18 @@ from google.colab import files
 shutil.make_archive("/content/ueba_models", 'zip', MODEL_DIR)
 files.download("/content/ueba_models.zip")
 print("Download started! Extract to src/ml/models/ in your local project.")
+
+# %% [markdown]
+# ## 🏠 Cell 10: (Tùy chọn) Chạy Local trên WSL với NVIDIA RTX 3050
+# Nếu bạn chạy file `.ipynb` này trên máy tính cá nhân (WSL2) có card **RTX 3050**, bạn **BỎ QUA Cell 1 và Cell 2**.
+# Mở terminal trên WSL, kích hoạt môi trường ảo: `source concrete_ml_env/bin/activate`.
+# 
+# Bạn có thể chạy trực tiếp các lệnh sau trên Jupyter Notebook mở bằng WSL:
+
+# %%
+# Uncomment các dòng dưới đây để chạy full pipeline (sử dụng python3 thay vì python3.10)
+
+# !python3 src/main.py prepare-data
+# !python3 src/main.py train --model mlp --epochs 50
+# !python3 src/main.py evaluate --model lr
+# !python3 src/main.py fhe-inference --model mlp
