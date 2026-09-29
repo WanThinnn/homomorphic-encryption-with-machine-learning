@@ -42,10 +42,46 @@ def _check_concrete_ml():
         sys.exit(1)
 
 
-def _get_model_path(model_dir: str, model_type: str) -> str:
-    """Get the path for the saved compiled FHE model."""
-    subdir = f"ueba_{model_type}"
-    return os.path.join(model_dir, subdir, f"concrete_{model_type}.json")
+def _get_model_dir(model_dir: str, model_type: str) -> str:
+    """Get the base directory for a model type."""
+    return os.path.join(model_dir, f"ueba_{model_type}")
+
+
+def _get_next_version(base_dir: str) -> int:
+    """Determine the next version number by scanning existing version directories."""
+    if not os.path.exists(base_dir):
+        return 1
+    existing = [d for d in os.listdir(base_dir) if d.startswith("v") and d[1:].isdigit()]
+    if not existing:
+        return 1
+    return max(int(d[1:]) for d in existing) + 1
+
+
+def _get_latest_version(base_dir: str) -> Optional[int]:
+    """Read the latest version number from latest.txt, or find the highest version."""
+    latest_file = os.path.join(base_dir, "latest.txt")
+    if os.path.exists(latest_file):
+        with open(latest_file, "r") as f:
+            ver_str = f.read().strip()
+            if ver_str.startswith("v"):
+                return int(ver_str[1:])
+    # Fallback: scan directories
+    if not os.path.exists(base_dir):
+        return None
+    existing = [d for d in os.listdir(base_dir) if d.startswith("v") and d[1:].isdigit()]
+    if not existing:
+        return None
+    return max(int(d[1:]) for d in existing)
+
+
+def _get_version_path(model_dir: str, model_type: str, version: Optional[int] = None) -> str:
+    """Get the model file path for a specific version (or latest)."""
+    base_dir = _get_model_dir(model_dir, model_type)
+    if version is None:
+        version = _get_latest_version(base_dir)
+        if version is None:
+            return os.path.join(base_dir, "v1", f"concrete_{model_type}.json")
+    return os.path.join(base_dir, f"v{version}", f"concrete_{model_type}.json")
 
 
 def _load_cached_model(model_path: str):
@@ -58,13 +94,68 @@ def _load_cached_model(model_path: str):
     return model
 
 
-def _save_model(model, model_path: str):
-    """Save a compiled Concrete ML model."""
+def _save_model(model, model_dir: str, model_type: str, metrics: Dict[str, Any], config: Dict[str, Any]) -> str:
+    """Save a compiled Concrete ML model with versioning and metadata."""
     from concrete.ml.common.serialization.dumpers import dump
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    from datetime import datetime
+
+    base_dir = _get_model_dir(model_dir, model_type)
+    version = _get_next_version(base_dir)
+    version_dir = os.path.join(base_dir, f"v{version}")
+    os.makedirs(version_dir, exist_ok=True)
+
+    # Save model
+    model_path = os.path.join(version_dir, f"concrete_{model_type}.json")
     with open(model_path, "w") as f:
         dump(model, f)
-    logger.info(f"Compiled FHE model saved to {model_path}")
+
+    # Save metadata
+    metadata = {
+        "version": version,
+        "model_type": model_type,
+        "trained_at": datetime.now().isoformat(),
+        "metrics": metrics,
+        "config": config,
+    }
+    meta_path = os.path.join(version_dir, "metadata.json")
+    with open(meta_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    # Update latest.txt
+    latest_path = os.path.join(base_dir, "latest.txt")
+    with open(latest_path, "w") as f:
+        f.write(f"v{version}")
+
+    logger.info(f"Model v{version} saved to {version_dir}")
+    return model_path
+
+
+def list_versions(model_dir: str, model_type: str):
+    """List all available model versions with their metadata."""
+    base_dir = _get_model_dir(model_dir, model_type)
+    if not os.path.exists(base_dir):
+        print(f"No models found for {model_type}")
+        return
+
+    latest = _get_latest_version(base_dir)
+    versions = sorted([d for d in os.listdir(base_dir) if d.startswith("v") and d[1:].isdigit()],
+                       key=lambda x: int(x[1:]))
+
+    print(f"\n{'='*60}")
+    print(f"  MODEL VERSIONS — {model_type.upper()}")
+    print(f"{'='*60}")
+    for v in versions:
+        meta_path = os.path.join(base_dir, v, "metadata.json")
+        marker = " ← latest" if int(v[1:]) == latest else ""
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                meta = json.load(f)
+            roc = meta.get("metrics", {}).get("roc_auc", "N/A")
+            date = meta.get("trained_at", "N/A")[:19]
+            print(f"  {v}: ROC-AUC={roc}  trained={date}{marker}")
+        else:
+            print(f"  {v}: (no metadata){marker}")
+    print(f"{'='*60}")
 
 
 # ============================================================
@@ -89,18 +180,23 @@ def _train_lr(X_train, y_train, n_bits=8):
     return model, t_compile
 
 
-def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
+def _train_mlp(X_train, y_train, n_bits=6, max_epochs=50):
     """
     Train a Concrete ML NeuralNetClassifier and compile to FHE circuit.
     
     Optimized for maximum model quality while maintaining FHE compatibility:
-      - n_bits=4: Best balance between precision and FHE circuit size
-        (3-bit = fast but weak, 6-bit = strong but won't compile)
+      - n_bits=6: Good balance between precision and FHE circuit size
+        (4-bit causes gradient corruption with Brevitas, 8-bit may fail to compile)
       - rounding_threshold_bits=6: Enables PBS (Programmable Bootstrapping) 
         rounding to prevent NoParametersFound errors at higher bit widths
       - 3 hidden layers with 4x neuron multiplier for deeper feature extraction
       - 50 epochs for better convergence
       - 5000 calibration samples for more accurate FHE bounds
+    
+    NOTE: Concrete ML's NeuralNetClassifier uses Brevitas for quantization-aware
+    training. Brevitas does NOT fully support CUDA (scale/zero_point tensors stay
+    on CPU while data is on GPU), causing silent gradient corruption and the model
+    gets stuck at 50% accuracy. Training MUST run on CPU.
     """
     from concrete.ml.sklearn import NeuralNetClassifier
     import torch
@@ -108,18 +204,19 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
     n_threads = os.cpu_count() or 2
     torch.set_num_threads(n_threads)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) on {device.upper()} with {n_threads} CPU threads for compilation...")
+    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) on CPU with {n_threads} threads...")
     model = NeuralNetClassifier(
-        module__n_layers=3,
+        module__n_layers=2,
         module__n_w_bits=n_bits,
         module__n_a_bits=n_bits,
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=4,
         max_epochs=max_epochs,
         batch_size=2048,
+        optimizer=torch.optim.Adam,
+        lr=0.001,
         verbose=1,
-        device=device,
+        callbacks="disable",
     )
     model.fit(X_train, y_train)
 
@@ -141,10 +238,8 @@ def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15
     """
     Train a Concrete ML model, compile to FHE circuit, evaluate, and save.
     
-    This is the MAIN training entry point. After this step:
-      - The model is trained with FHE-compatible quantization
-      - The FHE circuit is compiled and ready for encrypted inference
-      - The compiled model is saved for later use
+    This is the MAIN training entry point. Each run creates a new version:
+      v1, v2, v3... with metadata (metrics, config, timestamp).
     """
     _check_concrete_ml()
     from sklearn.metrics import classification_report, roc_auc_score
@@ -160,8 +255,10 @@ def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15
     # Train & compile
     if model_type == "lr":
         model, t_compile = _train_lr(X_train, y_train)
+        config = {"n_bits": 8, "model": "LogisticRegression"}
     elif model_type == "mlp":
         model, t_compile = _train_mlp(X_train, y_train, max_epochs=epochs)
+        config = {"n_bits": 6, "n_layers": 2, "epochs": epochs, "optimizer": "Adam", "lr": 0.001, "batch_size": 2048}
     else:
         raise ValueError(f"Supported models: lr, mlp. Got: {model_type}")
 
@@ -173,23 +270,24 @@ def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15
     logger.info(f"Validation Results ({model_type.upper()}):")
     logger.info("\n" + report)
 
+    metrics = {"compile_time_s": round(t_compile, 1)}
     try:
         y_proba = model.predict_proba(X_val)[:, 1]
-        auc = roc_auc_score(y_val, y_proba)
-        logger.info(f"ROC-AUC: {auc:.4f}")
+        auc_val = roc_auc_score(y_val, y_proba)
+        metrics["roc_auc"] = round(auc_val, 4)
+        logger.info(f"ROC-AUC: {auc_val:.4f}")
     except Exception:
         logger.warning("ROC-AUC could not be computed")
 
     logger.info(f"FHE Circuit compilation time: {t_compile:.1f}s")
 
-    # Save compiled model
-    model_path = _get_model_path(model_dir, model_type)
-    _save_model(model, model_path)
+    # Save compiled model with versioning
+    _save_model(model, model_dir, model_type, metrics=metrics, config=config)
 
     return model
 
 
-def evaluate_model(model_type: str, data_dir: str, model_dir: str):
+def evaluate_model(model_type: str, data_dir: str, model_dir: str, version: Optional[int] = None):
     """
     Load a saved Concrete ML model and evaluate on the test set.
     Uses plaintext simulation (fast) — same result as FHE but without encryption overhead.
@@ -197,11 +295,13 @@ def evaluate_model(model_type: str, data_dir: str, model_dir: str):
     _check_concrete_ml()
     from sklearn.metrics import classification_report, roc_auc_score, precision_recall_curve, auc
 
-    model_path = _get_model_path(model_dir, model_type)
+    model_path = _get_version_path(model_dir, model_type, version)
     if not os.path.exists(model_path):
         logger.error(f"No saved model found at {model_path}. Run 'train' first!")
         return
 
+    ver = version or _get_latest_version(_get_model_dir(model_dir, model_type))
+    logger.info(f"Using model v{ver}")
     model = _load_cached_model(model_path)
 
     X_test = np.load(os.path.join(data_dir, "X_test.npy"))
@@ -211,7 +311,7 @@ def evaluate_model(model_type: str, data_dir: str, model_dir: str):
 
     report = classification_report(y_test, y_pred, target_names=["Normal", "Anomalous"])
     print("\n" + "=" * 60)
-    print(f"  TEST RESULTS — {model_type.upper()} (Concrete ML)")
+    print(f"  TEST RESULTS — {model_type.upper()} v{ver} (Concrete ML)")
     print("=" * 60)
     print(report)
 
@@ -231,6 +331,7 @@ def run_fhe_inference(
     data_dir: str,
     model_dir: str,
     n_samples: int = 10,
+    version: Optional[int] = None,
 ):
     """
     Load a saved compiled model and run REAL FHE encrypted inference.
@@ -240,13 +341,14 @@ def run_fhe_inference(
     """
     _check_concrete_ml()
 
-    model_path = _get_model_path(model_dir, model_type)
+    model_path = _get_version_path(model_dir, model_type, version)
     if not os.path.exists(model_path):
         logger.error(f"No saved model found at {model_path}. Run 'train' first!")
         return
 
+    ver = version or _get_latest_version(_get_model_dir(model_dir, model_type))
     logger.info("=" * 60)
-    logger.info("  FHE ENCRYPTED INFERENCE (Concrete ML / TFHE)")
+    logger.info(f"  FHE ENCRYPTED INFERENCE — {model_type.upper()} v{ver}")
     logger.info("=" * 60)
 
     model = _load_cached_model(model_path)
@@ -286,7 +388,7 @@ def run_fhe_inference(
     fhe_vs_plain_match = sum(1 for f, p in zip(fhe_preds, plain_preds) if f == p)
 
     print("\n" + "=" * 60)
-    print(f"  FHE INFERENCE SUMMARY — {model_type.upper()}")
+    print(f"  FHE INFERENCE SUMMARY — {model_type.upper()} v{ver}")
     print("=" * 60)
     print(f"  Samples tested:         {n}")
     print(f"  Avg FHE inference:      {avg_time:.0f} ms/sample")

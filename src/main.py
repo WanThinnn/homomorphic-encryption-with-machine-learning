@@ -54,6 +54,7 @@ def cmd_evaluate(args):
         model_type=args.model,
         data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
         model_dir=os.path.join(SRC_DIR, "ml", "models"),
+        version=args.version,
     )
 
 
@@ -65,6 +66,7 @@ def cmd_fhe_inference(args):
         data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
         model_dir=os.path.join(SRC_DIR, "ml", "models"),
         n_samples=args.n_samples,
+        version=args.version,
     )
 
 
@@ -131,16 +133,22 @@ def main():
     # --- evaluate ---
     sp_eval = subparsers.add_parser("evaluate", help="Evaluate trained model on test set")
     sp_eval.add_argument("--model", choices=["lr", "mlp"], default="lr")
+    sp_eval.add_argument("--version", type=int, default=None, help="Model version (default: latest)")
 
     # --- fhe-inference ---
     sp_fhe = subparsers.add_parser("fhe-inference", help="Run REAL FHE encrypted inference")
     sp_fhe.add_argument("--model", choices=["lr", "mlp"], default="lr")
     sp_fhe.add_argument("--n-samples", type=int, default=10, help="Number of test samples")
+    sp_fhe.add_argument("--version", type=int, default=None, help="Model version (default: latest)")
 
     # --- benchmark ---
     sp_bench = subparsers.add_parser("benchmark", help="Run full benchmark suite")
     sp_bench.add_argument("--model", choices=["lr", "mlp"], default="lr")
     sp_bench.add_argument("--n-samples", type=int, default=100)
+
+    # --- list-versions ---
+    sp_versions = subparsers.add_parser("list-versions", help="List all trained model versions")
+    sp_versions.add_argument("--model", choices=["lr", "mlp"], default="mlp")
 
     args = parser.parse_args()
 
@@ -158,6 +166,10 @@ def main():
         "evaluate": cmd_evaluate,
         "fhe-inference": cmd_fhe_inference,
         "benchmark": cmd_benchmark,
+        "list-versions": lambda args: __import__('ml.ueba_concrete_ml', fromlist=['list_versions']).list_versions(
+            model_dir=os.path.join(SRC_DIR, "ml", "models"),
+            model_type=args.model,
+        ),
     }
     dispatch[args.mode](args)
 
