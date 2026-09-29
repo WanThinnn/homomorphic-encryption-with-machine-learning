@@ -1,12 +1,17 @@
 """
-UEBA Concrete ML Pipeline (TFHE)
+UEBA Concrete ML Pipeline (TFHE) — Unified Train + FHE Inference
 
-Uses Zama's Concrete ML to compile scikit-learn / torch models into FHE circuits
-and run privacy-preserving inference on encrypted behavioral vectors.
+This is the CORE module of the system. All models are trained, compiled,
+and inferred using Concrete ML's FHE-native pipeline.
 
-Supports:
-  - Logistic Regression (ConcreteML LogisticRegression)
-  - MLP (ConcreteML NeuralNetClassifier)
+Architecture:
+  1. train()      → Train quantized model + Compile FHE circuit + Save
+  2. evaluate()   → Load saved model + Evaluate on test set (plaintext simulate)
+  3. inference()  → Load saved model + Run real FHE encrypted inference
+
+Supported Models:
+  - lr:  Concrete ML LogisticRegression (8-bit quantization)
+  - mlp: Concrete ML NeuralNetClassifier (3-bit quantization)
 
 Requires: Linux/WSL + concrete-ml installed
 """
@@ -16,16 +21,18 @@ import time
 import json
 import logging
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+N_FEATURES = 17
 
 
 def _check_concrete_ml():
     """Verify Concrete ML is available (Linux/WSL only)."""
     if sys.platform != "linux":
         logger.error("Concrete ML requires Linux/WSL!")
-        logger.error("Run this command under WSL: python src/main.py fhe-inference --platform concrete")
+        logger.error("Run under WSL: python src/main.py train --model lr")
         sys.exit(1)
     try:
         import concrete.ml
@@ -35,7 +42,36 @@ def _check_concrete_ml():
         sys.exit(1)
 
 
-def _train_and_compile_lr(X_train, y_train, n_bits=8):
+def _get_model_path(model_dir: str, model_type: str) -> str:
+    """Get the path for the saved compiled FHE model."""
+    subdir = f"ueba_{model_type}"
+    return os.path.join(model_dir, subdir, f"concrete_{model_type}.json")
+
+
+def _load_cached_model(model_path: str):
+    """Load a previously saved Concrete ML model."""
+    from concrete.ml.common.serialization.loaders import load
+    logger.info(f"Loading compiled FHE model from {model_path}...")
+    with open(model_path, "r") as f:
+        model = load(f)
+    logger.info("Model loaded successfully!")
+    return model
+
+
+def _save_model(model, model_path: str):
+    """Save a compiled Concrete ML model."""
+    from concrete.ml.common.serialization.dumpers import dump
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    with open(model_path, "w") as f:
+        dump(model, f)
+    logger.info(f"Compiled FHE model saved to {model_path}")
+
+
+# ============================================================
+# Training Functions
+# ============================================================
+
+def _train_lr(X_train, y_train, n_bits=8):
     """Train a Concrete ML LogisticRegression and compile to FHE circuit."""
     from concrete.ml.sklearn import LogisticRegression
 
@@ -45,38 +81,30 @@ def _train_and_compile_lr(X_train, y_train, n_bits=8):
 
     logger.info("Compiling to FHE circuit...")
     t0 = time.perf_counter()
-    model.compile(X_train)
+    calib_size = min(1000, X_train.shape[0])
+    model.compile(X_train[:calib_size])
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")
 
     return model, t_compile
 
 
-def _train_and_compile_mlp(X_train, y_train, model_dir: str, n_bits=3):
-    """Train a Concrete ML NeuralNetClassifier, compile to FHE circuit, and save it."""
-    import torch
+def _train_mlp(X_train, y_train, n_bits=3, max_epochs=15):
+    """Train a Concrete ML NeuralNetClassifier and compile to FHE circuit."""
     from concrete.ml.sklearn import NeuralNetClassifier
-    from concrete.ml.common.serialization.dumpers import dump
-    from concrete.ml.common.serialization.loaders import load
-    
-    model_path = os.path.join(model_dir, "concrete_mlp.json")
-    if os.path.exists(model_path):
-        logger.info(f"Found compiled FHE circuit at {model_path}. Loading... (Skipping Train & Compile)")
-        with open(model_path, "r") as f:
-            model = load(f)
-        return model, 0.0
+    import torch
 
-    # Ép dùng 10 luồng CPU
-    torch.set_num_threads(10)
+    n_threads = max(os.cpu_count() - 2, 1)
+    torch.set_num_threads(n_threads)
 
-    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}) on CPU with 10 threads...")
+    logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) with {n_threads} threads...")
     model = NeuralNetClassifier(
         module__n_layers=2,
         module__n_w_bits=n_bits,
         module__n_a_bits=n_bits,
         module__n_accum_bits=32,
         module__n_hidden_neurons_multiplier=2,
-        max_epochs=15,
+        max_epochs=max_epochs,
         verbose=0,
     )
     model.fit(X_train, y_train)
@@ -88,50 +116,132 @@ def _train_and_compile_mlp(X_train, y_train, model_dir: str, n_bits=3):
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")
 
-    os.makedirs(model_dir, exist_ok=True)
-    with open(model_path, "w") as f:
-        dump(model, f)
-    logger.info(f"Saved compiled FHE circuit to {model_path}")
-
     return model, t_compile
 
 
-def run_concrete_inference(
+# ============================================================
+# Public API
+# ============================================================
+
+def train_model(model_type: str, data_dir: str, model_dir: str, epochs: int = 15):
+    """
+    Train a Concrete ML model, compile to FHE circuit, evaluate, and save.
+    
+    This is the MAIN training entry point. After this step:
+      - The model is trained with FHE-compatible quantization
+      - The FHE circuit is compiled and ready for encrypted inference
+      - The compiled model is saved for later use
+    """
+    _check_concrete_ml()
+    from sklearn.metrics import classification_report, roc_auc_score
+
+    # Load data
+    X_train = np.load(os.path.join(data_dir, "X_train.npy"))
+    y_train = np.load(os.path.join(data_dir, "y_train.npy"))
+    X_val = np.load(os.path.join(data_dir, "X_val.npy"))
+    y_val = np.load(os.path.join(data_dir, "y_val.npy"))
+
+    logger.info(f"Loaded data: train={X_train.shape}, val={X_val.shape}")
+
+    # Train & compile
+    if model_type == "lr":
+        model, t_compile = _train_lr(X_train, y_train)
+    elif model_type == "mlp":
+        model, t_compile = _train_mlp(X_train, y_train, max_epochs=epochs)
+    else:
+        raise ValueError(f"Supported models: lr, mlp. Got: {model_type}")
+
+    # Evaluate on validation set (plaintext simulate mode)
+    logger.info("Evaluating on validation set (plaintext simulate)...")
+    y_pred = model.predict(X_val)
+    
+    report = classification_report(y_val, y_pred, target_names=["Normal", "Anomalous"])
+    logger.info(f"Validation Results ({model_type.upper()}):")
+    logger.info("\n" + report)
+
+    try:
+        y_proba = model.predict_proba(X_val)[:, 1]
+        auc = roc_auc_score(y_val, y_proba)
+        logger.info(f"ROC-AUC: {auc:.4f}")
+    except Exception:
+        logger.warning("ROC-AUC could not be computed")
+
+    logger.info(f"FHE Circuit compilation time: {t_compile:.1f}s")
+
+    # Save compiled model
+    model_path = _get_model_path(model_dir, model_type)
+    _save_model(model, model_path)
+
+    return model
+
+
+def evaluate_model(model_type: str, data_dir: str, model_dir: str):
+    """
+    Load a saved Concrete ML model and evaluate on the test set.
+    Uses plaintext simulation (fast) — same result as FHE but without encryption overhead.
+    """
+    _check_concrete_ml()
+    from sklearn.metrics import classification_report, roc_auc_score, precision_recall_curve, auc
+
+    model_path = _get_model_path(model_dir, model_type)
+    if not os.path.exists(model_path):
+        logger.error(f"No saved model found at {model_path}. Run 'train' first!")
+        return
+
+    model = _load_cached_model(model_path)
+
+    X_test = np.load(os.path.join(data_dir, "X_test.npy"))
+    y_test = np.load(os.path.join(data_dir, "y_test.npy"))
+
+    y_pred = model.predict(X_test)
+
+    report = classification_report(y_test, y_pred, target_names=["Normal", "Anomalous"])
+    print("\n" + "=" * 60)
+    print(f"  TEST RESULTS — {model_type.upper()} (Concrete ML)")
+    print("=" * 60)
+    print(report)
+
+    try:
+        y_proba = model.predict_proba(X_test)[:, 1]
+        roc = roc_auc_score(y_test, y_proba)
+        print(f"ROC-AUC: {roc:.4f}")
+        prec, rec, _ = precision_recall_curve(y_test, y_proba)
+        pr_auc = auc(rec, prec)
+        print(f"PR-AUC:  {pr_auc:.4f}")
+    except Exception:
+        print("AUC metrics: N/A")
+
+
+def run_fhe_inference(
     model_type: str,
     data_dir: str,
     model_dir: str,
     n_samples: int = 10,
 ):
-    """Main entry point for Concrete ML (TFHE) inference."""
+    """
+    Load a saved compiled model and run REAL FHE encrypted inference.
+    
+    This simulates the production flow:
+      Client encrypts data → Server runs inference on ciphertext → Client decrypts result
+    """
     _check_concrete_ml()
 
+    model_path = _get_model_path(model_dir, model_type)
+    if not os.path.exists(model_path):
+        logger.error(f"No saved model found at {model_path}. Run 'train' first!")
+        return
+
     logger.info("=" * 60)
-    logger.info("  CONCRETE ML FHE INFERENCE (TFHE)")
+    logger.info("  FHE ENCRYPTED INFERENCE (Concrete ML / TFHE)")
     logger.info("=" * 60)
 
-    # Load data
-    X_train = np.load(os.path.join(data_dir, "X_train.npy"))
-    y_train = np.load(os.path.join(data_dir, "y_train.npy"))
+    model = _load_cached_model(model_path)
+
     X_test = np.load(os.path.join(data_dir, "X_test.npy"))
     y_test = np.load(os.path.join(data_dir, "y_test.npy"))
 
-    logger.info(f"Train: {X_train.shape}, Test: {X_test.shape}")
-
-    # Train & compile
-    if model_type == "lr":
-        model, t_compile = _train_and_compile_lr(X_train, y_train)
-    elif model_type == "mlp":
-        model, t_compile = _train_and_compile_mlp(X_train, y_train, model_dir)
-    else:
-        logger.error(f"Unknown model: {model_type}")
-        return
-
-    # Run FHE inference on test samples
-    results = {
-        "predictions": [],
-        "fhe_times": [],
-    }
-
+    # Run FHE inference
+    results = {"predictions": [], "fhe_times": []}
     n = min(n_samples, len(X_test))
     logger.info(f"Running FHE inference on {n} samples...")
 
@@ -148,7 +258,7 @@ def run_concrete_inference(
         if (i + 1) % 5 == 0 or i == 0:
             logger.info(f"  Sample {i+1}/{n} | time={t_fhe*1000:.0f}ms | pred={y_pred_fhe[0]}")
 
-    # Also run plaintext (simulate) for comparison
+    # Plaintext comparison
     y_pred_plain = model.predict(X_test[:n])
 
     # Summary
@@ -162,9 +272,8 @@ def run_concrete_inference(
     fhe_vs_plain_match = sum(1 for f, p in zip(fhe_preds, plain_preds) if f == p)
 
     print("\n" + "=" * 60)
-    print(f"  CONCRETE ML (TFHE) SUMMARY — {model_type.upper()}")
+    print(f"  FHE INFERENCE SUMMARY — {model_type.upper()}")
     print("=" * 60)
-    print(f"  Compilation time:       {t_compile:.1f}s")
     print(f"  Samples tested:         {n}")
     print(f"  Avg FHE inference:      {avg_time:.0f} ms/sample")
     print(f"  FHE accuracy:           {fhe_correct/n*100:.1f}%")

@@ -37,19 +37,19 @@ if SRC_DIR not in sys.path:
 
 
 def cmd_train(args):
-    """Train a plaintext ML model on CERT behavioral features."""
-    from ml.ueba_baseline import train_model
+    """Train a Concrete ML model (FHE-native), compile FHE circuit, and save."""
+    from ml.ueba_concrete_ml import train_model
     train_model(
         model_type=args.model,
         data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
-        output_dir=os.path.join(SRC_DIR, "ml", "models"),
+        model_dir=os.path.join(SRC_DIR, "ml", "models"),
         epochs=args.epochs,
     )
 
 
 def cmd_evaluate(args):
-    """Evaluate a trained plaintext model."""
-    from ml.ueba_baseline import evaluate_model
+    """Evaluate a trained Concrete ML model on the test set (plaintext simulate)."""
+    from ml.ueba_concrete_ml import evaluate_model
     evaluate_model(
         model_type=args.model,
         data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
@@ -58,30 +58,18 @@ def cmd_evaluate(args):
 
 
 def cmd_fhe_inference(args):
-    """Run FHE inference on a single sample or batch."""
-    if args.platform == "openfhe":
-        from crypto.ueba_ckks_inference import run_ckks_inference
-        run_ckks_inference(
-            model_type=args.model,
-            data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
-            model_dir=os.path.join(SRC_DIR, "ml", "models"),
-            n_samples=args.n_samples,
-        )
-    elif args.platform == "concrete":
-        from ml.ueba_concrete_ml import run_concrete_inference
-        run_concrete_inference(
-            model_type=args.model,
-            data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
-            model_dir=os.path.join(SRC_DIR, "ml", "models"),
-            n_samples=args.n_samples,
-        )
-    else:
-        logger.error(f"Unknown platform: {args.platform}")
-        sys.exit(1)
+    """Run REAL FHE encrypted inference using a saved compiled model."""
+    from ml.ueba_concrete_ml import run_fhe_inference
+    run_fhe_inference(
+        model_type=args.model,
+        data_dir=os.path.join(ROOT_DIR, "data", "cert", "processed"),
+        model_dir=os.path.join(SRC_DIR, "ml", "models"),
+        n_samples=args.n_samples,
+    )
 
 
 def cmd_benchmark(args):
-    """Run the full benchmark suite (plaintext vs CKKS vs TFHE)."""
+    """Run the full benchmark suite (plaintext vs FHE)."""
     from benchmark.run_all_experiments import run_benchmarks
     run_benchmarks(
         model_type=args.model,
@@ -136,18 +124,17 @@ def main():
     sp_data.add_argument("--source", choices=["cert", "elastic", "splunk"], default="cert", help="Data source adapter to use")
 
     # --- train ---
-    sp_train = subparsers.add_parser("train", help="Train a plaintext ML model")
-    sp_train.add_argument("--model", choices=["lr", "mlp", "autoencoder"], default="lr")
-    sp_train.add_argument("--epochs", type=int, default=100)
+    sp_train = subparsers.add_parser("train", help="Train FHE-native model (Concrete ML)")
+    sp_train.add_argument("--model", choices=["lr", "mlp"], default="lr")
+    sp_train.add_argument("--epochs", type=int, default=15, help="Training epochs (MLP only)")
 
     # --- evaluate ---
-    sp_eval = subparsers.add_parser("evaluate", help="Evaluate a trained model")
-    sp_eval.add_argument("--model", choices=["lr", "mlp", "autoencoder"], default="lr")
+    sp_eval = subparsers.add_parser("evaluate", help="Evaluate trained model on test set")
+    sp_eval.add_argument("--model", choices=["lr", "mlp"], default="lr")
 
     # --- fhe-inference ---
-    sp_fhe = subparsers.add_parser("fhe-inference", help="Run FHE inference")
+    sp_fhe = subparsers.add_parser("fhe-inference", help="Run REAL FHE encrypted inference")
     sp_fhe.add_argument("--model", choices=["lr", "mlp"], default="lr")
-    sp_fhe.add_argument("--platform", choices=["openfhe", "concrete"], default="openfhe")
     sp_fhe.add_argument("--n-samples", type=int, default=10, help="Number of test samples")
 
     # --- benchmark ---
