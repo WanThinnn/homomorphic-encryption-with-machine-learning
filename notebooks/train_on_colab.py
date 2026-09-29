@@ -5,22 +5,19 @@
 #
 # Workflow:
 #   1. Setup Environment
-#   2. Download CERT v4.2 Dataset
-#   3. Extract Features & Preprocess (SMOTE)
+#   2. Install Python 3.10 (Compatible with Concrete ML)
+#   3. Download CERT v4.2 Dataset
 #   4. Train LR + MLP (Concrete ML, FHE-native)
 #   5. Evaluate on Test Set
 #   6. Run FHE Encrypted Inference
-#   7. Save & Download Models
+#   7. Save Models
 
 # %% [markdown]
 # # 🔐 Privacy-Preserving UEBA with FHE + ML
 # ## Google Colab Training Notebook (Concrete ML)
 # ---
-# **Mục tiêu:** Train model FHE-native bằng Concrete ML trên Google Colab,
-# sau đó tải về chạy FHE Inference.
-#
-# **Lưu ý:** Concrete ML train model đã tối ưu sẵn cho FHE (lượng tử hóa).
-# Không cần train PyTorch/sklearn riêng rồi convert.
+# **Lưu ý Quan Trọng:** Google Colab hiện tại dùng Python 3.12+, nhưng `concrete-ml` chỉ hỗ trợ tối đa Python 3.11.
+# Notebook này sẽ tự động cài đặt **Python 3.10** và chạy các lệnh thông qua CLI để đảm bảo tương thích 100%.
 
 # %% [markdown]
 # ## 📦 Cell 1: Mount Drive & Clone Repo
@@ -45,29 +42,33 @@ os.chdir(WORK_DIR)
 print(f"Working directory: {os.getcwd()}")
 
 # %% [markdown]
-# ## 📦 Cell 2: Install Dependencies
+# ## 🐍 Cell 2: Install Python 3.10 & Dependencies
+# Chúng ta sẽ cài Python 3.10 và cài `concrete-ml` vào đó.
 
 # %%
-get_ipython().system('pip install -q concrete-ml imbalanced-learn')
+%%bash
+# Cài đặt Python 3.10
+sudo apt-get update -y
+sudo apt-get install python3.10 python3.10-distutils -y
 
-# Verify
-import concrete.ml
-print(f"Concrete ML: {concrete.ml.__version__}")
+# Cài pip cho Python 3.10
+curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python3.10 get-pip.py
 
-import torch
-print(f"PyTorch: {torch.__version__}")
-print(f"CUDA: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
+# Cài đặt thư viện FHE và ML
+python3.10 -m pip install -q concrete-ml imbalanced-learn torch torchvision scikit-learn pandas numpy
+
+# Kiểm tra version
+python3.10 -c "import concrete.ml; print('Concrete ML version:', concrete.ml.__version__)"
 
 # %% [markdown]
-# ## 📊 Cell 3: Download CERT v4.2 Dataset
+# ## 📊 Cell 3: Prepare Dataset
+# Download (nếu chưa có) và trích xuất đặc trưng + SMOTE.
 
 # %%
-DATA_DIR = os.path.join(WORK_DIR, "data", "cert", "raw")
-PROCESSED_DIR = os.path.join(WORK_DIR, "data", "cert", "processed")
+import os
 
-# Dataset đã có sẵn trên Google Drive (thư mục Colab Notebooks)
+DATA_DIR = os.path.join(WORK_DIR, "data", "cert", "raw")
 DRIVE_DATASET = "/content/drive/MyDrive/Colab Notebooks"
 CERT_TAR = os.path.join(DRIVE_DATASET, "r4.2.tar.bz2")
 ANSWERS_TAR = os.path.join(DRIVE_DATASET, "answers.tar.bz2")
@@ -98,101 +99,47 @@ if not os.path.exists(R42_DIR):
 else:
     print(f"Already extracted: {R42_DIR}")
 
+# Chạy tiền xử lý (Extract Features + SMOTE) bằng Python 3.10
+get_ipython().system('python3.10 src/main.py prepare-data')
+
 # %% [markdown]
-# ## 🔧 Cell 4: Feature Extraction & Preprocessing
+# ## 🧠 Cell 4: Train Logistic Regression (Concrete ML)
 
 # %%
-import sys
-sys.path.insert(0, os.path.join(WORK_DIR, "src"))
-
-import numpy as np
-
-# Feature extraction
-FEATURES_CSV = os.path.join(PROCESSED_DIR, "behavioral_features.csv")
-if not os.path.exists(FEATURES_CSV):
-    print("Extracting features from raw logs...")
-    from data.adapters.cert_adapter import extract_features
-    extract_features(raw_dir=R42_DIR, output_dir=PROCESSED_DIR)
-else:
-    print("Features already extracted. Skipping...")
-
-# Preprocessing (SMOTE)
-TRAIN_NPY = os.path.join(PROCESSED_DIR, "X_train.npy")
-if not os.path.exists(TRAIN_NPY):
-    print("Preprocessing (split + normalize + SMOTE)...")
-    from data.cert_preprocessor import preprocess
-    preprocess(data_dir=PROCESSED_DIR)
-else:
-    print("Preprocessed data exists. Skipping...")
-
-# Verify
-X_train = np.load(os.path.join(PROCESSED_DIR, "X_train.npy"))
-y_train = np.load(os.path.join(PROCESSED_DIR, "y_train.npy"))
-X_test = np.load(os.path.join(PROCESSED_DIR, "X_test.npy"))
-y_test = np.load(os.path.join(PROCESSED_DIR, "y_test.npy"))
-print(f"\nData ready!")
-print(f"  Train: {X_train.shape} | Normal={np.sum(y_train==0)}, Malicious={np.sum(y_train==1)}")
-print(f"  Test:  {X_test.shape}  | Normal={np.sum(y_test==0)}, Malicious={np.sum(y_test==1)}")
+get_ipython().system('python3.10 src/main.py train --model lr')
 
 # %% [markdown]
-# ## 🧠 Cell 5: Train Logistic Regression (Concrete ML)
+# ## 🧠 Cell 5: Train MLP (Concrete ML)
+# 4-bit quantization, 3 hidden layers, 50 epochs. Quá trình này sẽ mất vài phút.
 
 # %%
-from ml.ueba_concrete_ml import train_model
-
-MODEL_DIR = os.path.join(WORK_DIR, "src", "ml", "models")
-
-print("=" * 60)
-print("Training Concrete ML LogisticRegression (8-bit quantized)...")
-print("=" * 60)
-train_model(model_type="lr", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR)
-print("\nLR model trained + FHE circuit compiled + saved!")
+get_ipython().system('python3.10 src/main.py train --model mlp --epochs 50')
 
 # %% [markdown]
-# ## 🧠 Cell 6: Train MLP (Concrete ML)
+# ## 📊 Cell 6: Evaluate on Test Set
 
 # %%
-print("=" * 60)
-print("Training Concrete ML NeuralNetClassifier (4-bit, 3 layers, 50 epochs)...")
-print("This will take ~5-10 minutes on Colab GPU")
-print("=" * 60)
-train_model(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR, epochs=50)
-print("\nMLP model trained + FHE circuit compiled + saved!")
+print("=== LOGISTIC REGRESSION ===")
+get_ipython().system('python3.10 src/main.py evaluate --model lr')
+
+print("\n=== MLP ===")
+get_ipython().system('python3.10 src/main.py evaluate --model mlp')
 
 # %% [markdown]
-# ## 📊 Cell 7: Evaluate on Test Set
+# ## 🔐 Cell 7: FHE Encrypted Inference
+# Test chạy inference mã hóa thực tế trên model đã compile.
 
 # %%
-from ml.ueba_concrete_ml import evaluate_model
-
-print("=" * 60)
-print("  LOGISTIC REGRESSION")
-print("=" * 60)
-evaluate_model(model_type="lr", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR)
-
-print("\n")
-print("=" * 60)
-print("  MLP")
-print("=" * 60)
-evaluate_model(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR)
+get_ipython().system('python3.10 src/main.py fhe-inference --model mlp --n-samples 10')
 
 # %% [markdown]
-# ## 🔐 Cell 8: FHE Encrypted Inference
-
-# %%
-from ml.ueba_concrete_ml import run_fhe_inference
-
-print("Running REAL FHE inference (data encrypted -> compute on ciphertext -> decrypt result)")
-print("Each sample takes ~0.3-1 second\n")
-
-run_fhe_inference(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR, n_samples=10)
-
-# %% [markdown]
-# ## 💾 Cell 9: Save to Google Drive
+# ## 💾 Cell 8: Save to Google Drive
 
 # %%
 import shutil
 
+PROCESSED_DIR = os.path.join(WORK_DIR, "data", "cert", "processed")
+MODEL_DIR = os.path.join(WORK_DIR, "src", "ml", "models")
 DRIVE_MODELS = os.path.join(DRIVE_DATASET, "trained_models")
 os.makedirs(DRIVE_MODELS, exist_ok=True)
 
@@ -211,7 +158,7 @@ for fname in ["scaler.pkl", "feature_names.json"]:
 print(f"\nAll models saved to: {DRIVE_MODELS}")
 
 # %% [markdown]
-# ## 📥 Cell 10: Download as ZIP
+# ## 📥 Cell 9: Download as ZIP (Tùy chọn)
 
 # %%
 import shutil
