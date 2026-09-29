@@ -67,32 +67,34 @@ if torch.cuda.is_available():
 DATA_DIR = os.path.join(WORK_DIR, "data", "cert", "raw")
 PROCESSED_DIR = os.path.join(WORK_DIR, "data", "cert", "processed")
 
-# Cache trên Google Drive
-DRIVE_CACHE = "/content/drive/MyDrive/UEBA_FHE_Cache"
-os.makedirs(DRIVE_CACHE, exist_ok=True)
+# Dataset đã có sẵn trên Google Drive (thư mục Colab Notebooks)
+DRIVE_DATASET = "/content/drive/MyDrive/Colab Notebooks"
+CERT_TAR = os.path.join(DRIVE_DATASET, "r4.2.tar.bz2")
+ANSWERS_TAR = os.path.join(DRIVE_DATASET, "answers.tar.bz2")
 
-CERT_TAR = os.path.join(DRIVE_CACHE, "r4.2.tar.bz2")
-ANSWERS_TAR = os.path.join(DRIVE_CACHE, "answers.tar.bz2")
-
-if not os.path.exists(CERT_TAR):
+if os.path.exists(CERT_TAR):
+    print(f"Dataset found on Drive: {CERT_TAR}")
+else:
+    print(f"WARNING: Dataset not found at {CERT_TAR}")
     print("Downloading CERT v4.2 (~1.8GB)...")
-    get_ipython().system(f'wget -q --show-progress -O {CERT_TAR} "https://kilthub.cmu.edu/ndownloader/articles/7694453/versions/7"')
-else:
-    print(f"Dataset cached: {CERT_TAR}")
+    os.makedirs(DRIVE_DATASET, exist_ok=True)
+    get_ipython().system(f'wget -q --show-progress -O "{CERT_TAR}" "https://kilthub.cmu.edu/ndownloader/articles/7694453/versions/7"')
 
-if not os.path.exists(ANSWERS_TAR):
-    print("Downloading labels...")
-    get_ipython().system(f'wget -q --show-progress -O {ANSWERS_TAR} "https://kilthub.cmu.edu/ndownloader/articles/7694522/versions/1"')
+if os.path.exists(ANSWERS_TAR):
+    print(f"Labels found on Drive: {ANSWERS_TAR}")
 else:
-    print(f"Labels cached: {ANSWERS_TAR}")
+    print(f"WARNING: Labels not found at {ANSWERS_TAR}")
+    print("Downloading labels...")
+    get_ipython().system(f'wget -q --show-progress -O "{ANSWERS_TAR}" "https://kilthub.cmu.edu/ndownloader/articles/7694522/versions/1"')
 
 # Extract
 os.makedirs(DATA_DIR, exist_ok=True)
 R42_DIR = os.path.join(DATA_DIR, "r4.2")
 if not os.path.exists(R42_DIR):
-    print("Extracting...")
-    get_ipython().system(f'tar -xjf {CERT_TAR} -C {DATA_DIR}')
-    get_ipython().system(f'tar -xjf {ANSWERS_TAR} -C {DATA_DIR}')
+    print("Extracting dataset...")
+    get_ipython().system(f'tar -xjf "{CERT_TAR}" -C {DATA_DIR}')
+    get_ipython().system(f'tar -xjf "{ANSWERS_TAR}" -C {DATA_DIR}')
+    print("Extraction complete!")
 else:
     print(f"Already extracted: {R42_DIR}")
 
@@ -191,7 +193,7 @@ run_fhe_inference(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR,
 # %%
 import shutil
 
-DRIVE_MODELS = os.path.join(DRIVE_CACHE, "trained_models")
+DRIVE_MODELS = os.path.join(DRIVE_DATASET, "trained_models")
 os.makedirs(DRIVE_MODELS, exist_ok=True)
 
 for model_name in ["ueba_lr", "ueba_mlp"]:
