@@ -264,11 +264,19 @@ def _load_labels(raw_dir: str) -> pd.DataFrame:
     label = 1 for malicious activity, 0 for normal.
     """
     # CERT v4.2 provides labels in various formats
-    # Try common patterns
-    for fname in ["insiders.csv", "answers.csv"]:
-        path = os.path.join(raw_dir, fname)
+    # Try common patterns in raw_dir and its parent directory (if answers is extracted separately)
+    parent_dir = os.path.dirname(raw_dir)
+    potential_paths = [
+        os.path.join(raw_dir, "insiders.csv"),
+        os.path.join(raw_dir, "answers.csv"),
+        os.path.join(parent_dir, "answers", "insiders.csv"),
+        os.path.join(parent_dir, "answers", "answers.csv"),
+        os.path.join(parent_dir, "insiders.csv"),
+    ]
+
+    for path in potential_paths:
         if os.path.exists(path):
-            logger.info(f"Loading labels from {fname}...")
+            logger.info(f"Loading labels from {path}...")
             df = pd.read_csv(path)
             df.columns = [c.strip().lower() for c in df.columns]
             # Normalize to (user, day, label)
