@@ -117,8 +117,6 @@ def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
         module__n_hidden_neurons_multiplier=4,
         max_epochs=max_epochs,
         verbose=0,
-        # FHE optimization: enable rounding to reduce circuit complexity
-        rounding_threshold_bits=6,
     )
     model.fit(X_train, y_train)
 
