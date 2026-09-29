@@ -126,7 +126,7 @@ def main():
     # --- train ---
     sp_train = subparsers.add_parser("train", help="Train FHE-native model (Concrete ML)")
     sp_train.add_argument("--model", choices=["lr", "mlp"], default="lr")
-    sp_train.add_argument("--epochs", type=int, default=15, help="Training epochs (MLP only)")
+    sp_train.add_argument("--epochs", type=int, default=50, help="Training epochs (MLP only)")
 
     # --- evaluate ---
     sp_eval = subparsers.add_parser("evaluate", help="Evaluate trained model on test set")

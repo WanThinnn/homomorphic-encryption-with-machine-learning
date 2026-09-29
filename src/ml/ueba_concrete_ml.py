@@ -89,8 +89,19 @@ def _train_lr(X_train, y_train, n_bits=8):
     return model, t_compile
 
 
-def _train_mlp(X_train, y_train, n_bits=3, max_epochs=15):
-    """Train a Concrete ML NeuralNetClassifier and compile to FHE circuit."""
+def _train_mlp(X_train, y_train, n_bits=4, max_epochs=50):
+    """
+    Train a Concrete ML NeuralNetClassifier and compile to FHE circuit.
+    
+    Optimized for maximum model quality while maintaining FHE compatibility:
+      - n_bits=4: Best balance between precision and FHE circuit size
+        (3-bit = fast but weak, 6-bit = strong but won't compile)
+      - rounding_threshold_bits=6: Enables PBS (Programmable Bootstrapping) 
+        rounding to prevent NoParametersFound errors at higher bit widths
+      - 3 hidden layers with 4x neuron multiplier for deeper feature extraction
+      - 50 epochs for better convergence
+      - 5000 calibration samples for more accurate FHE bounds
+    """
     from concrete.ml.sklearn import NeuralNetClassifier
     import torch
 
@@ -99,19 +110,21 @@ def _train_mlp(X_train, y_train, n_bits=3, max_epochs=15):
 
     logger.info(f"Training Concrete ML NeuralNetClassifier (n_bits={n_bits}, epochs={max_epochs}) with {n_threads} threads...")
     model = NeuralNetClassifier(
-        module__n_layers=2,
+        module__n_layers=3,
         module__n_w_bits=n_bits,
         module__n_a_bits=n_bits,
         module__n_accum_bits=32,
-        module__n_hidden_neurons_multiplier=2,
+        module__n_hidden_neurons_multiplier=4,
         max_epochs=max_epochs,
         verbose=0,
+        # FHE optimization: enable rounding to reduce circuit complexity
+        rounding_threshold_bits=6,
     )
     model.fit(X_train, y_train)
 
-    logger.info("Compiling to FHE circuit (calibrating with 1000 samples)...")
+    logger.info("Compiling to FHE circuit (calibrating with 5000 samples)...")
     t0 = time.perf_counter()
-    calib_size = min(1000, X_train.shape[0])
+    calib_size = min(5000, X_train.shape[0])
     model.compile(X_train[:calib_size])
     t_compile = time.perf_counter() - t0
     logger.info(f"Compilation complete in {t_compile:.1f}s")

@@ -151,9 +151,10 @@ print("\nLR model trained + FHE circuit compiled + saved!")
 
 # %%
 print("=" * 60)
-print("Training Concrete ML NeuralNetClassifier (3-bit quantized)...")
+print("Training Concrete ML NeuralNetClassifier (4-bit, 3 layers, 50 epochs)...")
+print("This will take ~5-10 minutes on Colab GPU")
 print("=" * 60)
-train_model(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR, epochs=15)
+train_model(model_type="mlp", data_dir=PROCESSED_DIR, model_dir=MODEL_DIR, epochs=50)
 print("\nMLP model trained + FHE circuit compiled + saved!")
 
 # %% [markdown]
