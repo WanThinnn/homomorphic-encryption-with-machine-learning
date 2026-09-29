@@ -53,10 +53,10 @@ sudo apt-get install python3.10 python3.10-distutils -y
 
 # Cài pip cho Python 3.10
 curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-python3.10 get-pip.py
+python3.10 get-pip.py --ignore-installed
 
-# Cài đặt thư viện FHE và ML
-python3.10 -m pip install -q concrete-ml imbalanced-learn torch torchvision scikit-learn pandas numpy
+# Cài đặt thư viện FHE và ML (Bỏ qua các package hệ thống để tránh lỗi Debian)
+python3.10 -m pip install -q concrete-ml imbalanced-learn torch torchvision scikit-learn pandas numpy --ignore-installed
 
 # Kiểm tra version
 python3.10 -c "import concrete.ml; print('Concrete ML version:', concrete.ml.__version__)"
