@@ -129,17 +129,35 @@ python src/main.py benchmark --model lr --n-samples 100
 
 ## Dependencies
 
-**Core (all platforms):**
+You can install the core data science dependencies using the provided `requirements.txt`:
+
 ```bash
-pip install numpy pandas scikit-learn torch imbalanced-learn
+pip install -r requirements.txt
 ```
 
-**Concrete ML (Linux/WSL only):**
+**Core requirements include:** `numpy`, `pandas`, `scikit-learn`, `torch`, `imbalanced-learn`.
+
+### FHE Backends Setup
+
+#### 1. Concrete ML (Linux/WSL only - Recommended for TFHE)
+To use Concrete ML, you must be on a Linux or WSL environment. 
+
+**For CPU-only inference:**
 ```bash
-pip install concrete-ml
+pip install concrete-ml==1.9.0
 ```
 
-**OpenFHE**: Pre-compiled DLLs bundled in `src/lib/`.
+**For GPU-accelerated inference (CUDA 11.8+):**
+If you have an NVIDIA GPU, you can massively speed up FHE compilation and inference (e.g., from 3 minutes down to milliseconds) by installing the CUDA wheel from Zama's private registry:
+```bash
+pip install concrete-ml==1.9.0
+pip uninstall -y concrete-python concrete-compiler
+pip install concrete-python==2.10.0 --extra-index-url https://pypi.zama.ai/gpu
+```
+*(Make sure the version of `concrete-python` matches exactly what `concrete-ml` requires, here `2.10.0` for `concrete-ml 1.9.0`).*
+
+#### 2. OpenFHE (Windows compatible - CKKS)
+Pre-compiled OpenFHE bindings for Python (`openfhe.pyd`) are bundled in the `src/lib/` folder. No external `pip` installation is required if you are on Windows, but you must ensure Python can load `.pyd` files.
 
 ## Legacy Code
 
